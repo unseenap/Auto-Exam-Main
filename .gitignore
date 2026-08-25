@@ -1,0 +1,122 @@
+# -----------------------------------------------------------------------------
+# Environment, credentials, and local configuration
+# -----------------------------------------------------------------------------
+/.env
+/.env.*
+!/.env.example
+*.local
+*.secret
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+auth.json
+
+# -----------------------------------------------------------------------------
+# Runtime data: never commit sessions, uploads, logs, exports, or backups
+# -----------------------------------------------------------------------------
+/storage/cache/*
+/storage/exports/*
+/storage/imports/*
+/storage/logs/*
+/storage/sessions/*
+/storage/backups/*
+!/storage/cache/.gitkeep
+!/storage/exports/.gitkeep
+!/storage/imports/.gitkeep
+!/storage/logs/.gitkeep
+!/storage/sessions/.gitkeep
+!/storage/backups/.gitkeep
+
+# Keep the intentional CSV templates and demo datasets under storage/demo-data.
+
+# -----------------------------------------------------------------------------
+# Generated builds, deployment bundles, previews, and scratch work
+# -----------------------------------------------------------------------------
+/deployment/infinityfree/package/
+/deployment/infinityfree/*.zip
+/outputs/
+/tmp/
+/dist/
+/build/
+/coverage/
+/.phpunit.cache/
+/.phpunit.result.cache
+*.inspect.ndjson
+*.preview.png
+*.generated.*
+
+# -----------------------------------------------------------------------------
+# Local source/reference documents and generated working guides
+# -----------------------------------------------------------------------------
+/doc/
+/DEPLOYMENT.md
+/DEVELOPMENT_PLAN.md
+/OPERATOR_GUIDE.md
+/deployment/infinityfree/HOSTING-GUIDE.md
+
+# -----------------------------------------------------------------------------
+# Agent, assistant, and local automation workspace metadata
+# -----------------------------------------------------------------------------
+/.agents/
+/.codex/
+/.claude/
+/.cursor/
+/.continue/
+/.aider*
+/.windsurf/
+/AGENTS.md
+/CLAUDE.md
+/codex-*.md
+/chatgpt-*.md
+*.prompt.md
+*.transcript.*
+
+# -----------------------------------------------------------------------------
+# Dependencies (enable only if introduced by a package manager)
+# -----------------------------------------------------------------------------
+/vendor/
+/node_modules/
+
+# Bundled Tabler assets are part of the application, not Composer dependencies.
+!/public/assets/vendor/
+!/public/assets/vendor/**
+
+# -----------------------------------------------------------------------------
+# Database/runtime artifacts; keep database/*.sql source and upgrade scripts
+# -----------------------------------------------------------------------------
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz
+*.sql.zip
+*.bak
+
+# -----------------------------------------------------------------------------
+# Editor and operating-system files
+# -----------------------------------------------------------------------------
+/.idea/
+/.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# -----------------------------------------------------------------------------
+# General temporary files
+# -----------------------------------------------------------------------------
+*.log
+*.tmp
+*.temp
+*.cache
+*.pid
+*.seed
+*.orig
+*.rej
+*.stackdump

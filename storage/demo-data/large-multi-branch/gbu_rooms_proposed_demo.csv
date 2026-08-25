@@ -1,0 +1,21 @@
+Room Code,Building,Floor,Rows,Columns,Seat Order,Disabled Seat Numbers,Priority,Status,Notes
+ICT-101,School of ICT Block,Ground Floor,6,8,column_major,R01-C01 | R06-C08,10,active,Proposed demo room - verify with GBU
+ICT-102,School of ICT Block,Ground Floor,6,8,column_major,,11,active,Proposed demo room - verify with GBU
+ICT-201,School of ICT Block,First Floor,7,8,column_major,R02-C04 | R03-C04 | R05-C08,12,active,Proposed demo room - verify with GBU
+ICT-202,School of ICT Block,First Floor,7,8,row_major,R01-C08 | R07-C08,13,active,Proposed demo room - verify with GBU
+ICT-301,School of ICT Block,Second Floor,8,8,column_major,R04-C04 | R04-C05,14,active,Proposed demo room - verify with GBU
+SOE-101,School of Engineering Block,Ground Floor,6,10,column_major,R01-C01 | R06-C10,20,active,Proposed demo room - verify with GBU
+SOE-102,School of Engineering Block,Ground Floor,6,10,row_major,R03-C05 | R03-C06,21,active,Proposed demo room - verify with GBU
+SOE-201,School of Engineering Block,First Floor,8,10,column_major,R01-C10 | R08-C10 | R04-C05,22,active,Proposed demo room - verify with GBU
+SOE-202,School of Engineering Block,First Floor,7,10,column_major,,23,active,Proposed demo room - verify with GBU
+SOM-101,School of Management Block,Ground Floor,6,8,row_major,R06-C01 | R06-C08,30,active,Proposed demo room - verify with GBU
+SOM-201,School of Management Block,First Floor,6,9,column_major,R03-C05,31,active,Proposed demo room - verify with GBU
+SOBT-101,School of Biotechnology Block,Ground Floor,5,8,column_major,R01-C08 | R05-C08,40,active,Proposed demo room - verify with GBU
+SOBT-201,School of Biotechnology Block,First Floor,6,8,row_major,R02-C02 | R02-C07,41,active,Proposed demo room - verify with GBU
+SOHSS-101,School of Humanities Block,Ground Floor,6,8,column_major,R06-C04,50,active,Proposed demo room - verify with GBU
+SOHSS-201,School of Humanities Block,First Floor,5,8,row_major,,51,active,Proposed demo room - verify with GBU
+SOLJG-101,School of Law Block,Ground Floor,6,9,column_major,R01-C01 | R01-C09,60,active,Proposed demo room - verify with GBU
+SOLJG-201,School of Law Block,First Floor,6,8,row_major,R03-C04 | R03-C05,61,active,Proposed demo room - verify with GBU
+SOBSC-101,School of Buddhist Studies Block,Ground Floor,5,8,column_major,R05-C01,70,active,Proposed demo room - verify with GBU
+SOVSAS-101,Vocational Studies Block,Ground Floor,6,8,row_major,R01-C08 | R06-C08,80,active,Proposed demo room - verify with GBU
+SOVSAS-201,Vocational Studies Block,First Floor,5,10,column_major,R03-C05 | R03-C06,81,active,Proposed demo room - verify with GBU

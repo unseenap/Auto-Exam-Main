@@ -1,0 +1,35 @@
+Exam Date,Shift,Course Code,Course Name,Programme Code,Semester,Category,Display Label
+2026-08-24,Morning Shift,ICS501,Integrated B.Tech Computer Science and Engineering - Core Concepts and Applications,ICS,5,regular,Integrated B.Tech Computer Science and Engineering Semester 5
+2026-08-24,Evening Shift,ICS502,Integrated B.Tech Computer Science and Engineering - Advanced Methods and Practice,ICS,5,regular,Integrated B.Tech Computer Science and Engineering Semester 5
+2026-08-25,Morning Shift,IEC501,Electronics and Communication Engineering - Core Concepts and Applications,IEC,5,regular,Integrated Electronics and Communication Engineering Semester 5
+2026-08-25,Evening Shift,IEC502,Electronics and Communication Engineering - Advanced Methods and Practice,IEC,5,regular,Integrated Electronics and Communication Engineering Semester 5
+2026-08-26,Morning Shift,LCS301,Computer Science and Engineering - Core Concepts and Applications,LCS,3,regular,CSE Lateral Entry Semester 3
+2026-08-26,Evening Shift,LCS302,Computer Science and Engineering - Advanced Methods and Practice,LCS,3,regular,CSE Lateral Entry Semester 3
+2026-08-27,Morning Shift,LEA301,Electronics AI and Machine Learning - Core Concepts and Applications,LEA,3,regular,ECE AI and ML Lateral Entry Semester 3
+2026-08-27,Evening Shift,LEA302,Electronics AI and Machine Learning - Advanced Methods and Practice,LEA,3,regular,ECE AI and ML Lateral Entry Semester 3
+2026-08-28,Morning Shift,LIT301,Information Technology - Core Concepts and Applications,LIT,3,regular,IT Lateral Entry Semester 3
+2026-08-28,Evening Shift,LIT302,Information Technology - Advanced Methods and Practice,LIT,3,regular,IT Lateral Entry Semester 3
+2026-08-29,Morning Shift,PCS101,Computer Science and Engineering - Core Concepts and Applications,PCS,1,regular,M.Tech Computer Science and Engineering Semester 1
+2026-08-29,Evening Shift,PCS102,Computer Science and Engineering - Advanced Methods and Practice,PCS,1,regular,M.Tech Computer Science and Engineering Semester 1
+2026-08-31,Morning Shift,PCW101,Computer Science and Engineering - Core Concepts and Applications,PCW,1,regular,M.Tech CSE Working Professional Semester 1
+2026-08-31,Evening Shift,PCW102,Computer Science and Engineering - Advanced Methods and Practice,PCW,1,regular,M.Tech CSE Working Professional Semester 1
+2026-09-01,Morning Shift,UAI301,Artificial Intelligence - Core Concepts and Applications,UAI,3,regular,B.Tech Artificial Intelligence Semester 3
+2026-09-01,Evening Shift,UAI302,Artificial Intelligence - Advanced Methods and Practice,UAI,3,regular,B.Tech Artificial Intelligence Semester 3
+2026-09-02,Morning Shift,UCA301,Computer Applications - Core Concepts and Applications,UCA,3,regular,Bachelor of Computer Applications Semester 3
+2026-09-02,Evening Shift,UCA302,Computer Applications - Advanced Methods and Practice,UCA,3,regular,Bachelor of Computer Applications Semester 3
+2026-09-03,Morning Shift,UCC301,Cyber Security - Core Concepts and Applications,UCC,3,regular,B.Tech Cyber Security Semester 3
+2026-09-03,Evening Shift,UCC302,Cyber Security - Advanced Methods and Practice,UCC,3,regular,B.Tech Cyber Security Semester 3
+2026-09-04,Morning Shift,UCD301,Data Science - Core Concepts and Applications,UCD,3,regular,B.Tech Data Science Semester 3
+2026-09-04,Evening Shift,UCD302,Data Science - Advanced Methods and Practice,UCD,3,regular,B.Tech Data Science Semester 3
+2026-09-05,Morning Shift,UCM301,Machine Learning - Core Concepts and Applications,UCM,3,regular,B.Tech Machine Learning Semester 3
+2026-09-05,Evening Shift,UCM302,Machine Learning - Advanced Methods and Practice,UCM,3,regular,B.Tech Machine Learning Semester 3
+2026-09-07,Morning Shift,UCS501,Computer Science and Engineering - Core Concepts and Applications,UCS,5,regular,B.Tech Computer Science and Engineering Semester 5
+2026-09-07,Evening Shift,UCS502,Computer Science and Engineering - Advanced Methods and Practice,UCS,5,regular,B.Tech Computer Science and Engineering Semester 5
+2026-09-08,Morning Shift,UEA301,Electronics AI and Machine Learning - Core Concepts and Applications,UEA,3,regular,B.Tech ECE Artificial Intelligence and Machine Learning Semester 3
+2026-09-08,Evening Shift,UEA302,Electronics AI and Machine Learning - Advanced Methods and Practice,UEA,3,regular,B.Tech ECE Artificial Intelligence and Machine Learning Semester 3
+2026-09-09,Morning Shift,UEC301,Electronics and Communication Engineering - Core Concepts and Applications,UEC,3,regular,B.Tech Electronics and Communication Engineering Semester 3
+2026-09-09,Evening Shift,UEC302,Electronics and Communication Engineering - Advanced Methods and Practice,UEC,3,regular,B.Tech Electronics and Communication Engineering Semester 3
+2026-09-10,Morning Shift,UIT301,Information Technology - Core Concepts and Applications,UIT,3,regular,B.Tech Information Technology Semester 3
+2026-09-10,Evening Shift,UIT302,Information Technology - Advanced Methods and Practice,UIT,3,regular,B.Tech Information Technology Semester 3
+2026-09-11,Morning Shift,UVL301,VLSI Design and Embedded Systems - Core Concepts and Applications,UVL,3,regular,B.Tech ECE VLSI Design and Embedded Systems Semester 3
+2026-09-11,Evening Shift,UVL302,VLSI Design and Embedded Systems - Advanced Methods and Practice,UVL,3,regular,B.Tech ECE VLSI Design and Embedded Systems Semester 3

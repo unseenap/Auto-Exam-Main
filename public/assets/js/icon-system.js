@@ -1,0 +1,15 @@
+(()=>{
+  const icon=(name)=>{const i=document.createElement('i');i.className=`ti ti-${name}`;i.setAttribute('aria-hidden','true');return i;};
+  const nav={Dashboard:'layout-dashboard','Exam cycles':'calendar-event','Date sheets':'calendar-week','Seating plans':'armchair-2','Invigilation':'user-shield','Replacements':'user-scan','Attendance':'clipboard-check','Reports':'chart-bar','Audit logs':'history','Schools':'building-community','Programmes':'hierarchy-3','Courses':'books','Students':'users-group','Faculty':'school','Rooms':'door','Users & roles':'user-cog'};
+  document.querySelectorAll('.nav-groups a').forEach(a=>{const name=nav[a.textContent.trim()];if(name&&!a.querySelector('.ti'))a.prepend(icon(name));});
+  const legacy={
+    'icon-cycle':'calendar-event','icon-calendar':'calendar-week','icon-add':'plus','icon-students':'users-group','icon-faculty':'school','icon-seat':'armchair-2','icon-clock':'clock','icon-alert':'alert-triangle','icon-swap':'arrows-exchange','icon-checklist':'clipboard-check','icon-published':'rosette-discount-check','icon-report':'chart-bar','icon-upload':'upload','icon-school':'building-community','icon-programme':'hierarchy-3','icon-search':'search','icon-audit':'history','icon-detail':'list-details','icon-download':'download','icon-plan':'clipboard-text'
+  };
+  Object.entries(legacy).forEach(([old,name])=>document.querySelectorAll(`.${old}`).forEach(el=>{el.classList.remove('dash-icon','gov-icon',old);el.classList.add('ti',`ti-${name}`);el.setAttribute('aria-hidden','true');}));
+  const actions=[
+    [/bulk|import|upload/i,'upload'],[/download|export/i,'download'],[/print|pdf/i,'printer'],[/generate|create|add|new/i,'plus'],[/save|commit/i,'device-floppy'],[/schedule/i,'calendar-plus'],[/publish/i,'send'],[/edit|update/i,'edit'],[/filter/i,'filter'],[/search/i,'search'],[/validate|review|preview/i,'checks'],[/back|cancel/i,'arrow-left'],[/approve/i,'circle-check'],[/reject/i,'circle-x'],[/replace|move/i,'arrows-exchange'],[/sign out|logout/i,'logout']
+  ];
+  document.querySelectorAll('button,.primary-button,.secondary-button,.text-button,.heading-actions a,.form-actions a,.commit-bar button').forEach(el=>{if(el.querySelector('.ti')||el.classList.contains('sidebar-toggle')||el.classList.contains('sidebar-collapse'))return;const text=(el.textContent||'').trim();const match=actions.find(([pattern])=>pattern.test(text));if(match){el.prepend(icon(match[1]));el.classList.add('has-ti');}});
+  document.querySelectorAll('.status-label').forEach(el=>{if(el.querySelector('.ti'))return;const status=el.textContent.trim().toLowerCase();const name=/active|valid|ready|published|approved|present/.test(status)?'circle-check':/draft|review|pending|unmarked/.test(status)?'clock-hour-4':/invalid|rejected|cancelled|locked|inactive|absent/.test(status)?'alert-circle':'info-circle';el.prepend(icon(name));});
+  document.querySelectorAll('.file-drop').forEach(el=>{if(!el.querySelector('.file-drop-icon')){const i=icon('file-upload');i.classList.add('file-drop-icon');el.prepend(i);}});
+})();

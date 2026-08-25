@@ -1,0 +1,2 @@
+.brand-mark{overflow:hidden;background:#fff}.brand-mark img{display:block;width:42px;height:42px;object-fit:contain}.official-sheet header::before,.seating-sheet header::before{content:"";display:block;width:54px;height:54px;margin:0 auto 8px;background:url("../images/gbu-emblem.png") center/contain no-repeat}
+@media print{.official-sheet header::before,.seating-sheet header::before{print-color-adjust:exact;-webkit-print-color-adjust:exact}}

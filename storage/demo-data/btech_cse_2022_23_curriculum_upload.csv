@@ -1,0 +1,95 @@
+Course Code,Course Name,Programme Code,Semester,Category,Status
+MA101,Engineering Mathematics-I,UCS,1,core,active
+PH102,Engineering Physics,UCS,1,core,active
+EE102,Basic Electrical Engineering,UCS,1,core,active
+ME101,Engineering Mechanics,UCS,1,core,active
+ES101,Environmental Studies,UCS,1,core,active
+PH104,Engineering Physics Lab,UCS,1,core,active
+EE104,Basic Electrical Engineering Lab,UCS,1,core,active
+EN151,Language Lab,UCS,1,core,active
+ME102,Workshop Practice,UCS,1,core,active
+GP,General Proficiency,UCS,1,common,active
+CS101,Fundamentals of Computer Programming,UCS,2,core,active
+CS102,Computer Organization and Architecture,UCS,2,core,active
+MA102,Engineering Mathematics-II,UCS,2,core,active
+EC101,Basic Electronics Engineering,UCS,2,core,active
+CS105,Introduction to Artificial Intelligence,UCS,2,core,active
+EN101,English Proficiency,UCS,2,core,active
+CE103,Engineering Graphics,UCS,2,core,active
+CS181,Computer Programming Lab,UCS,2,core,active
+CS183,Computer Organization and Architecture Lab,UCS,2,core,active
+EC181,Basic Electronics Engineering Lab,UCS,2,core,active
+GP,General Proficiency,UCS,2,common,active
+CS201,Internet Technology,UCS,3,core,active
+CS203,Concepts of Operating Systems,UCS,3,core,active
+CS205,Data Structure and Algorithms,UCS,3,core,active
+CS207,Problem Solving using C++,UCS,3,core,active
+CS209,Logic Design,UCS,3,core,active
+MA201,Engineering Mathematics- III,UCS,3,core,active
+CS281,Data Structure and Algorithms Lab,UCS,3,core,active
+CS283,Object- Oriented Programming Lab,UCS,3,core,active
+CS285,Logic Design Lab,UCS,3,core,active
+GP,General Proficiency,UCS,3,common,active
+CS202,Software Engineering,UCS,4,core,active
+CS204,Database Management System,UCS,4,core,active
+CS206,Java Programming,UCS,4,core,active
+CS208,Artificial Intelligence,UCS,4,core,active
+CS210,Theory of Automata,UCS,4,core,active
+CS212,Discrete Structure,UCS,4,core,active
+CS282,Database Management System Lab,UCS,4,core,active
+CS284,Java Programming Lab,UCS,4,core,active
+CS286,Artificial Intelligence Lab,UCS,4,core,active
+GP,General Proficiency,UCS,4,common,active
+CS301,Computer Networks,UCS,5,core,active
+CS303,Compiler Design,UCS,5,core,active
+CS305,Wireless Communication,UCS,5,core,active
+CS307,Python,UCS,5,core,active
+CS381,Computer Networks Lab,UCS,5,core,active
+CS383,Compiler Design Lab,UCS,5,core,active
+CS385,Python Programming Lab,UCS,5,core,active
+GP,General Proficiency,UCS,5,common,active
+CS309,Computer Graphics,UCS,5,elective,active
+CS311,Computer Vision,UCS,5,elective,active
+CS313,Android Operating System,UCS,5,elective,active
+CS315,Computer Based Numerical and Statistical Techniques,UCS,5,elective,active
+CS317,Data Mining,UCS,5,elective,active
+CS319,System Analysis & Design,UCS,5,elective,active
+CS321,Software Project Management,UCS,5,elective,active
+CS323,Information Retrieval System,UCS,5,elective,active
+CS325,Graph Theory,UCS,5,elective,active
+CS327,Knowledge Engineering,UCS,5,elective,active
+CS302,Web Development using PHP,UCS,6,core,active
+CS304,Software Testing,UCS,6,core,active
+CS306,Analysis and Design of Algorithms,UCS,6,core,active
+CS308,Cyber Security,UCS,6,core,active
+CS382,Web Development using PHP Lab,UCS,6,core,active
+CS384,Analysis and Design of Algorithms Lab,UCS,6,core,active
+CS386,Cyber Security Lab,UCS,6,core,active
+GP,General Proficiency,UCS,6,common,active
+CS310,Digital Image Processing,UCS,6,elective,active
+CS312,Adhoc & Sensor Networks,UCS,6,elective,active
+CS314,Expert System,UCS,6,elective,active
+CS316,Fault tolerant System,UCS,6,elective,active
+CS318,Mobile Computing,UCS,6,elective,active
+CS320,Computer security,UCS,6,elective,active
+CS322,Management Information system,UCS,6,elective,active
+CS324,Evolutionary Computation,UCS,6,elective,active
+CS326,Fuzzy logic,UCS,6,elective,active
+CS328,Big Data Analytics,UCS,6,elective,active
+MA401,Modeling and Simulation,UCS,7,core,active
+CS401,Internet of Things,UCS,7,core,active
+CS403,Soft Computing Techniques,UCS,7,core,active
+CS405,Machine Learning,UCS,7,core,active
+CS481,Internet of Things Lab,UCS,7,core,active
+CS491,Minor Project,UCS,7,core,active
+CS493,Industrial Training,UCS,7,core,active
+GP,General Proficiency,UCS,7,common,active
+CS407,Pattern Recognition,UCS,7,elective,active
+CS409,Robotics,UCS,7,elective,active
+CS411,Optimization Techniques,UCS,7,elective,active
+CS413,Cloud Computing,UCS,7,elective,active
+CS415,Information Security,UCS,7,elective,active
+CS490,Seminar,UCS,8,core,active
+CS492,Major Project,UCS,8,core,active
+CS494,Internship,UCS,8,core,active
+GP,General Proficiency,UCS,8,common,active
