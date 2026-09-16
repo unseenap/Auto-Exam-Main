@@ -32,8 +32,6 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\public.htaccess') -De
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\.env.infinityfree') -Destination (Join-Path $uploadRoot '.env')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'HOSTING-GUIDE.md') -Destination (Join-Path $packageRoot 'HOSTING-GUIDE.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'infinityfree_upgrade_reserved_column.sql') -Destination (Join-Path $setupRoot 'infinityfree_upgrade_reserved_column.sql')
-Copy-Item -LiteralPath (Join-Path $projectRoot 'database\infinityfree_demo_data_seed.sql') -Destination (Join-Path $setupRoot 'infinityfree_demo_data_seed.sql')
-Copy-Item -LiteralPath (Join-Path $projectRoot 'database\infinityfree_room_seed.sql') -Destination (Join-Path $setupRoot 'infinityfree_room_seed.sql')
 
 $schema = Get-Content -LiteralPath (Join-Path $projectRoot 'database\schema.sql')
 if ($schema[0] -notmatch '^CREATE DATABASE') {

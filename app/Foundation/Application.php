@@ -15,6 +15,10 @@ use App\Import\RoomImportService;
 use App\Import\CourseImportService;
 use App\Rooms\RoomSeatGenerator;
 use App\Exams\ExamService;
+use App\Exams\SchedulingValidator;
+use App\Exams\AutomaticScheduler;
+use App\Exams\ScheduleReviewService;
+use App\Exams\SchedulePublicationService;
 use App\Seating\SeatingAllocator;
 use App\Http\Request;
 use App\Http\Response;
@@ -138,12 +142,29 @@ final class Application
         if (preg_match('#^/rooms/(\d+)/edit$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/form',$this->roomFormData((int)$matches[1])));
         if (preg_match('#^/rooms/(\d+)/layout$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/layout',$this->roomLayoutData((int)$matches[1])));
         if($path==='/exam-cycles'&&$method==='POST')return $this->saveExamCycle($request);
+        if(preg_match('#^/exam-cycles/(\\d+)/delete(?:/(confirm))?$#',$path,$matches)===1&&in_array($method,['GET','POST'],true))return $this->deleteExamCycle($request,(int)$matches[1],$method,$matches[2]??'');
+        if($path==='/date-sheets/template.csv'&&$method==='GET')return Response::csv("Exam Date,Shift,Course Code,Course Name,Programme Code,Semester,Category,Display Label,Batch Label,Roll Numbers\r\n2026-05-14,1,MA112,Applied Mathematics-II,UCS,2,regular,B.Tech CSE Semester 2,,\r\n2026-05-14,1,MA112,Applied Mathematics-II,ICS,2,regular,Integrated CSE Semester 2,,\r\n",'gbu-date-sheet-template.csv');
+        if(preg_match('#^/exam-cycles/(\d+)/calendar$#',$path,$matches)===1&&$method==='POST')return $this->saveExamCalendar($request,(int)$matches[1]);
+        if(preg_match('#^/exam-cycles/(\d+)/calendar$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/calendar',$this->examCalendarData((int)$matches[1])));
         if($path==='/courses'&&$method==='POST')return $this->saveCourse($request);
+        if(preg_match('#^/courses/curriculum/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteCourseMapping($request,(int)$matches[1]);
         if($path==='/courses/import/template.csv'&&$method==='GET')return $this->courseImportTemplate();
         if($path==='/courses/import'&&$method==='POST')return $this->stageCourseImport($request);
         if(preg_match('#^/courses/import/(\d+)/commit$#',$path,$matches)===1&&$method==='POST')return $this->commitCourseImport($request,(int)$matches[1]);
         if(preg_match('#^/courses/import/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/course-import-preview',$this->courseImportPreview((int)$matches[1])));
         if(preg_match('#^/date-sheets/(\d+)/papers$#',$path,$matches)===1&&$method==='POST')return $this->schedulePaper($request,(int)$matches[1]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/preview$#',$path,$matches)===1&&$method==='POST')return $this->previewAutomaticSchedule($request,(int)$matches[1]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/validate$#',$path,$matches)===1&&$method==='POST')return $this->validateAutomaticSchedule($request,(int)$matches[1]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/generate$#',$path,$matches)===1&&$method==='POST')return $this->generateAutomaticSchedule($request,(int)$matches[1]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/papers/(\d+)/lock$#',$path,$matches)===1&&$method==='POST')return $this->lockAutomaticPaper($request,(int)$matches[1],(int)$matches[2],(int)$matches[3]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/papers/(\d+)/move$#',$path,$matches)===1&&$method==='POST')return $this->moveAutomaticPaper($request,(int)$matches[1],(int)$matches[2],(int)$matches[3]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/regenerate$#',$path,$matches)===1&&$method==='POST')return $this->regenerateAutomaticSchedule($request,(int)$matches[1],(int)$matches[2]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/approve$#',$path,$matches)===1&&$method==='POST')return $this->approveAutomaticSchedule($request,(int)$matches[1],(int)$matches[2]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/publish$#',$path,$matches)===1&&$method==='POST')return $this->publishAutomaticSchedule($request,(int)$matches[1],(int)$matches[2]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/export.csv$#',$path,$matches)===1&&$method==='GET')return $this->automaticRunCsv((int)$matches[1],(int)$matches[2]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/compare$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/automatic-compare',$this->automaticCompareData((int)$matches[1],(int)$matches[2])));
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/automatic-review',$this->automaticRunData((int)$matches[1],(int)$matches[2])));
+        if(preg_match('#^/date-sheets/(\d+)/automatic$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/automatic',$this->automaticScheduleData((int)$matches[1])));
         if(preg_match('#^/date-sheets/(\d+)/import$#',$path,$matches)===1&&$method==='POST')return $this->stageDateSheetImport($request,(int)$matches[1]);
         if(preg_match('#^/date-sheets/(\d+)/import/(\d+)/commit$#',$path,$matches)===1&&$method==='POST')return $this->commitDateSheetImport($request,(int)$matches[1],(int)$matches[2]);
         if(preg_match('#^/date-sheets/(\d+)/import/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/import-preview',$this->dateSheetImportPreview((int)$matches[1],(int)$matches[2])));
@@ -530,13 +551,38 @@ final class Application
 
     private function examCycleData(): array
     {
-        return ['cycles'=>$this->database->connection()->query("SELECT ec.*,
+        return ['canDeletePublished'=>($this->auth->user()['role_code']??'')==='admin','cycles'=>$this->database->connection()->query("SELECT ec.*,
             (SELECT COUNT(*) FROM examinations e WHERE e.cycle_id=ec.id AND e.status<>'cancelled') AS paper_count,
             (SELECT COUNT(*) FROM exam_shifts es WHERE es.cycle_id=ec.id) AS shift_count,
             (SELECT COUNT(*) FROM seating_allocations sa WHERE sa.cycle_id=ec.id) AS allocation_count,
             (SELECT COUNT(*) FROM exam_eligibility ee JOIN examinations e2 ON e2.id=ee.examination_id WHERE e2.cycle_id=ec.id AND ee.eligibility_status='eligible') AS eligible_count
             FROM exam_cycles ec ORDER BY ec.start_date DESC")->fetchAll(PDO::FETCH_ASSOC),
             'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+    }
+
+    private function deleteExamCycle(Request $request,int $id,string $method,string $action): Response
+    {
+        $key='delete_exam_cycle_'.$id;
+        $service=new \App\Exams\ExamCycleDeletionService($this->database->connection());
+        try{
+            if($method==='GET'){
+                $this->session->forget($key);
+                return Response::html(View::render('exams/cycle-delete',['preview'=>$service->preview($id,(int)$this->auth->user()['id']),'step'=>1,'token'=>'']));
+            }
+            if(!$this->session->validCsrf((string)$request->input('_token')))throw new \RuntimeException('Session token expired. Start the deletion review again.');
+            if($action==='confirm'){
+                if($request->input('acknowledge')!=='1')throw new \RuntimeException('Review and acknowledge the first confirmation.');
+                $preview=$service->preview($id,(int)$this->auth->user()['id']);$token=bin2hex(random_bytes(32));
+                $this->session->put($key,['token'=>$token,'expires'=>time()+600,'fingerprint'=>\App\Exams\ExamCycleDeletionService::fingerprint($preview)]);
+                return Response::html(View::render('exams/cycle-delete',compact('preview','token')+['step'=>2]));
+            }
+            $confirmation=$this->session->get($key);$this->session->forget($key);
+            if(!is_array($confirmation)||$confirmation['expires']<time()||!hash_equals($confirmation['token'],(string)$request->input('deletion_token')))throw new \RuntimeException('Complete both confirmation steps within 10 minutes. Nothing was deleted.');
+            $service->delete($id,(int)$this->auth->user()['id'],(string)$request->input('confirmation_name'),$confirmation['fingerprint']);
+            $this->session->flash('success','Examination cycle and its date sheet deleted. Recovery requires a database backup.');
+        }catch(\RuntimeException $e){$this->session->flash('error',$e->getMessage());}
+        catch(\Throwable $e){$this->session->flash('error','The cycle could not be deleted because of linked records or a database error. No changes were saved.');}
+        return Response::redirect(url('exam-cycles'));
     }
 
     private function saveExamCycle(Request $request): Response
@@ -556,19 +602,54 @@ final class Application
 
     private function courseData(): array
     {
-        $pdo=$this->database->connection();return ['courses'=>$pdo->query("SELECT c.*,pc.semester,pc.category,p.id AS programme_id,p.code AS programme_code,p.name AS programme_name,d.name AS department_name,s.short_name AS school_name FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN departments d ON d.id=p.department_id JOIN schools s ON s.id=p.school_id ORDER BY p.code,pc.semester,c.code")->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $pdo=$this->database->connection();return ['courses'=>$pdo->query("SELECT c.*,pc.id AS mapping_id,pc.semester,pc.category,pc.course_credits,pc.course_level,pc.course_year,pc.mid_sem_duration_minutes,pc.end_sem_duration_minutes,pc.subject_priority,p.id AS programme_id,p.code AS programme_code,p.name AS programme_name,d.name AS department_name,s.short_name AS school_name FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN departments d ON d.id=p.department_id JOIN schools s ON s.id=p.school_id ORDER BY p.code,pc.semester,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveCourse(Request $request): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('courses'));
-        $code=strtoupper(trim((string)$request->input('code')));$name=trim((string)$request->input('name'));$programmeId=(int)$request->input('programme_id');$semester=(int)$request->input('semester');$category=(string)$request->input('category','core');
-        if($code===''||$name===''||$programmeId<1||$semester<1||$semester>12){$this->session->flash('error','Course code, name, programme, and a valid semester are required.');return Response::redirect(url('courses'));}
-        $pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare('SELECT id FROM courses WHERE code=:code');$q->execute(['code'=>$code]);$courseId=(int)$q->fetchColumn();if(!$courseId){$pdo->prepare("INSERT INTO courses(code,name,status) VALUES(:code,:name,'active')")->execute(['code'=>$code,'name'=>$name]);$courseId=(int)$pdo->lastInsertId();}else{$pdo->prepare('UPDATE courses SET name=:name WHERE id=:id')->execute(['name'=>$name,'id'=>$courseId]);}$pdo->prepare('INSERT INTO programme_courses(programme_id,course_id,semester,category) VALUES(:programme,:course,:semester,:category) ON DUPLICATE KEY UPDATE category=VALUES(category)')->execute(['programme'=>$programmeId,'course'=>$courseId,'semester'=>$semester,'category'=>$category]);$pdo->commit();$this->session->flash('success','Subject added to the programme curriculum.');}
+        $code=strtoupper(trim((string)$request->input('code')));$name=trim((string)$request->input('name'));$programmeId=(int)$request->input('programme_id');$semester=(int)$request->input('semester');$category=(string)$request->input('category','core');$priority=(int)$request->input('subject_priority',50);$credits=(float)$request->input('course_credits',0);$level=strtoupper((string)$request->input('course_level','UG'));$year=(int)$request->input('course_year',max(1,(int)ceil($semester/2)));$midMinutes=(int)round((float)$request->input('mid_sem_hours',1.5)*60);$endMinutes=(int)round((float)$request->input('end_sem_hours',3)*60);
+        if($code===''||$name===''||$programmeId<1||$semester<1||$semester>12||$priority<1||$priority>100||$credits<0||$credits>99.9||!in_array($level,['UG','PG'],true)||$year<1||$year>6||$midMinutes<30||$midMinutes>360||$endMinutes<30||$endMinutes>480){$this->session->flash('error','Review the course identity, credits, level, year, semester, exam hours, and scheduling priority.');return Response::redirect(url('courses'));}
+        $pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare('SELECT id FROM courses WHERE code=:code');$q->execute(['code'=>$code]);$courseId=(int)$q->fetchColumn();if(!$courseId){$pdo->prepare("INSERT INTO courses(code,name,status) VALUES(:code,:name,'active')")->execute(['code'=>$code,'name'=>$name]);$courseId=(int)$pdo->lastInsertId();}else{$pdo->prepare('UPDATE courses SET name=:name WHERE id=:id')->execute(['name'=>$name,'id'=>$courseId]);}$pdo->prepare('INSERT INTO programme_courses(programme_id,course_id,semester,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority) VALUES(:programme,:course,:semester,:category,:credits,:level,:year,:mid,:end,:priority) ON DUPLICATE KEY UPDATE category=VALUES(category),course_credits=VALUES(course_credits),course_level=VALUES(course_level),course_year=VALUES(course_year),mid_sem_duration_minutes=VALUES(mid_sem_duration_minutes),end_sem_duration_minutes=VALUES(end_sem_duration_minutes),subject_priority=VALUES(subject_priority)')->execute(['programme'=>$programmeId,'course'=>$courseId,'semester'=>$semester,'category'=>$category,'credits'=>$credits,'level'=>$level,'year'=>$year,'mid'=>$midMinutes,'end'=>$endMinutes,'priority'=>$priority]);$pdo->commit();$this->session->flash('success','Course structure saved for the selected programme and semester.');}
         catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url('courses'));
     }
 
-    private function courseImportTemplate(): Response {return Response::csv("Course Code,Course Name,Programme Code,Semester,Category,Status\r\nCS-101,Programming Fundamentals,UCS,1,core,active\r\nCS-102,Discrete Mathematics,UCS,1,core,active\r\n",'gbu-course-curriculum-template.csv');}
+
+    private function deleteCourseMapping(Request $request,int $id): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token'))){
+            $this->session->flash('error','Your session token expired. Reload the page and try again.');
+            return Response::redirect(url('courses'));
+        }
+        try{
+            (new \App\Exams\CourseDeletionService($this->database->connection()))->deleteMapping($id,(int)$this->auth->user()['id']);
+            $this->session->flash('success','Course removed from the selected branch and semester. Other branches and the subject master are unchanged.');
+        }catch(\RuntimeException $e){$this->session->flash('error',$e->getMessage());}
+        catch(\Throwable $e){$this->session->flash('error','The course could not be removed. It may be referenced by another record.');}
+        return Response::redirect(url('courses'));
+    }
+
+    private function courseImportTemplate(): Response {return Response::csv("Course Code,Course Name,Programme Code,Course Credits,Course Level,Course Year,Semester,Category,Mid Sem Hours,End Sem Hours,Status,Subject Priority\r\nCS-101,Programming Fundamentals,UCS,4,UG,1,1,core,1.5,3,active,10\r\nCS-102,Discrete Mathematics,UCS,4,UG,1,1,core,1.5,3,active,20\r\n",'gbu-course-structure-template.csv');}
+
+    private function examCalendarData(int $cycleId): array
+    {
+        $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
+        $insert=$pdo->prepare("INSERT IGNORE INTO exam_calendar_dates(cycle_id,exam_date,is_exam_day,day_type,note) VALUES(:cycle,:date,:enabled,:type,:note)");
+        $period=new \DatePeriod(new \DateTimeImmutable($cycle['start_date']),new \DateInterval('P1D'),(new \DateTimeImmutable($cycle['end_date']))->modify('+1 day'));
+        foreach($period as $date){$sunday=$date->format('N')==='7';$insert->execute(['cycle'=>$cycleId,'date'=>$date->format('Y-m-d'),'enabled'=>$sunday?0:1,'type'=>$sunday?'sunday':'exam_day','note'=>$sunday?'Sunday':null]);}
+        $q=$pdo->prepare('SELECT * FROM exam_calendar_dates WHERE cycle_id=:id ORDER BY exam_date');$q->execute(['id'=>$cycleId]);
+        return ['cycle'=>$cycle,'dates'=>$q->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+    }
+
+    private function saveExamCalendar(Request $request,int $cycleId): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("exam-cycles/{$cycleId}/calendar"));
+        $dates=$_POST['dates']??[];$pdo=$this->database->connection();$statement=$pdo->prepare('UPDATE exam_calendar_dates SET is_exam_day=:enabled,day_type=:type,note=:note WHERE id=:id AND cycle_id=:cycle');
+        $allowed=['exam_day','sunday','holiday','restricted_holiday','preparation_day','blocked'];
+        try{$pdo->beginTransaction();foreach($dates as $id=>$row){$type=in_array($row['day_type']??'',$allowed,true)?$row['day_type']:'blocked';$enabled=isset($row['is_exam_day'])&&$type==='exam_day'?1:0;$statement->execute(['enabled'=>$enabled,'type'=>$type,'note'=>trim((string)($row['note']??''))?:null,'id'=>(int)$id,'cycle'=>$cycleId]);}$pdo->commit();$this->session->flash('success','Examination calendar updated. Scheduling will use only enabled exam days.');}
+        catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}
+        return Response::redirect(url("exam-cycles/{$cycleId}/calendar"));
+    }
     private function stageCourseImport(Request $request): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('courses/import'));
@@ -589,11 +670,18 @@ final class Application
     {
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
         $q=$pdo->prepare('SELECT * FROM exam_calendar_dates WHERE cycle_id=:id AND is_exam_day=1 ORDER BY exam_date');$q->execute(['id'=>$cycleId]);$dates=$q->fetchAll(PDO::FETCH_ASSOC);
-        $q=$pdo->prepare("SELECT e.id,e.exam_date,es.name AS shift_name,es.start_time,es.end_time,c.code AS course_code,c.name AS course_name,
-            p.id AS programme_id,p.name AS programme_name,p.code AS programme_code,ec.semester,ec.display_label,(SELECT COUNT(*) FROM exam_eligibility ee WHERE ee.examination_id=e.id AND ee.eligibility_status='eligible') AS eligible_count
-            FROM examinations e JOIN exam_shifts es ON es.id=e.shift_id JOIN courses c ON c.id=e.course_id JOIN examination_cohorts ec ON ec.examination_id=e.id JOIN programmes p ON p.id=ec.programme_id
-            WHERE e.cycle_id=:id AND e.status<>'cancelled' ORDER BY p.name,ec.semester,es.sequence_no,e.exam_date");$q->execute(['id'=>$cycleId]);$papers=$q->fetchAll(PDO::FETCH_ASSOC);
-        $matrix=[];foreach($papers as $paper){$key=$paper['programme_id'].'-'.$paper['semester'].'-'.$paper['shift_name'];$matrix[$key]['label']=$paper['display_label']?:$paper['programme_name'].' Semester '.$paper['semester'];$matrix[$key]['shift']=$paper['shift_name'];$matrix[$key]['time']=substr($paper['start_time'],0,5).' - '.substr($paper['end_time'],0,5);$matrix[$key]['cells'][$paper['exam_date']][]=$paper;}
+        $q=$pdo->prepare("SELECT e.id,e.exam_date,es.name AS shift_name,es.start_time,es.end_time,es.sequence_no,c.code AS course_code,c.name AS course_name,
+            p.id AS programme_id,p.name AS programme_name,p.code AS programme_code,ec.batch_id,b.label AS batch_label,ec.semester,ec.display_label,
+            (SELECT COUNT(*) FROM exam_eligibility ee JOIN students st ON st.id=ee.student_id WHERE ee.examination_id=e.id AND ee.eligibility_status='eligible' AND st.programme_id=ec.programme_id AND (ec.batch_id IS NULL OR st.batch_id=ec.batch_id)) AS eligible_count
+            FROM examinations e JOIN exam_shifts es ON es.id=e.shift_id JOIN courses c ON c.id=e.course_id JOIN examination_cohorts ec ON ec.examination_id=e.id JOIN programmes p ON p.id=ec.programme_id LEFT JOIN batches b ON b.id=ec.batch_id
+            WHERE e.cycle_id=:id AND e.status<>'cancelled' ORDER BY p.code,ec.batch_id,ec.semester,e.exam_date,es.sequence_no,c.code");$q->execute(['id'=>$cycleId]);$papers=$q->fetchAll(PDO::FETCH_ASSOC);
+        $matrix=[];foreach($papers as $paper){
+            // Render one line per branch/batch/semester even when multiple branches
+            // share the same examination record.
+            $key=$paper['programme_id'].'-'.($paper['batch_id']?:0).'-'.$paper['semester'];
+            if(!isset($matrix[$key])){$batch=$paper['batch_label']?' · '.$paper['batch_label']:'';$matrix[$key]=['programme_code'=>$paper['programme_code'],'label'=>$paper['display_label']?:$paper['programme_code'].' — '.$paper['programme_name'].$batch.' · Semester '.$paper['semester'],'cells'=>[]];}
+            $matrix[$key]['cells'][$paper['exam_date']][]=$paper;
+        }
         return compact('cycle','dates','papers','matrix')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
@@ -611,6 +699,87 @@ final class Application
             'category'=>(string)$request->input('category','regular'),'programme_id'=>(int)$request->input('programme_id'),'semester'=>(int)$request->input('semester'),'display_label'=>trim((string)$request->input('display_label'))?:null];
         try{(new ExamService($this->database->connection()))->schedule($data);$this->session->flash('success','Paper scheduled and eligible students calculated.');return Response::redirect(url("date-sheets/{$cycleId}"));}
         catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url("date-sheets/{$cycleId}/schedule"));}
+    }
+
+    private function automaticScheduleData(int $cycleId): array
+    {
+        $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
+        $schools=$pdo->query("SELECT id,code,name,short_name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+        $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);
+        $last=$this->session->pullFlash('validation_result');
+        return compact('cycle','schools','programmes')+['result'=>$last,'selection'=>$this->session->get('automatic_scope_'.$cycleId,[]),'error'=>$this->session->pullFlash('error')];
+    }
+
+    private function validateAutomaticSchedule(Request $request,int $cycleId): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic"));
+        $scope=$this->automaticScope($request,$cycleId);
+        $this->session->put('automatic_scope_'.$cycleId,$scope);
+        try{$result=(new SchedulingValidator($this->database->connection()))->validate($scope,(int)$this->auth->user()['id']);$this->session->flash('validation_result',$result);}
+        catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}
+        return Response::redirect(url("date-sheets/{$cycleId}/automatic"));
+    }
+
+    private function previewAutomaticSchedule(Request $request,int $cycleId): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::json(['error'=>'Your session token expired. Refresh the page.'],403);
+        try{return Response::json((new SchedulingValidator($this->database->connection()))->validate($this->automaticScope($request,$cycleId),(int)$this->auth->user()['id'],false));}
+        catch(\Throwable $e){return Response::json(['error'=>$e->getMessage()],422);}
+    }
+
+    private function automaticScope(Request $request,int $cycleId): array
+    {
+        return ['cycle_id'=>$cycleId,'school_id'=>(int)$request->input('school_id'),'programme_ids'=>$_POST['programme_ids']??[],'semesters'=>$_POST['semesters']??[],'minimum_gap_days'=>(int)$request->input('minimum_gap_days',1),'maximum_papers_per_day'=>(int)$request->input('maximum_papers_per_day',1),'avoid_consecutive_days'=>$request->input('avoid_consecutive_days'),'use_subject_priority'=>$request->input('use_subject_priority')];
+    }
+
+    private function generateAutomaticSchedule(Request $request,int $cycleId): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic"));$runId=(int)$request->input('run_id');
+        $pdo=$this->database->connection();$q=$pdo->prepare('SELECT COUNT(*) FROM scheduling_runs WHERE id=:run AND cycle_id=:cycle');$q->execute(['run'=>$runId,'cycle'=>$cycleId]);if((int)$q->fetchColumn()!==1){$this->session->flash('error','The scheduling run does not belong to this cycle.');return Response::redirect(url("date-sheets/{$cycleId}/automatic"));}
+        try{$result=(new AutomaticScheduler($pdo))->generate($runId,(int)$this->auth->user()['id']);$this->session->flash('success',"Draft generated: {$result['scheduled']} papers scheduled and {$result['unscheduled']} require review.");return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));}
+        catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url("date-sheets/{$cycleId}/automatic"));}
+    }
+
+    private function automaticRunData(int $cycleId,int $runId):array
+    {
+        $pdo=$this->database->connection();$q=$pdo->prepare('SELECT sr.*,ec.name AS cycle_name,s.name AS school_name FROM scheduling_runs sr JOIN exam_cycles ec ON ec.id=sr.cycle_id JOIN schools s ON s.id=sr.school_id WHERE sr.id=:run AND sr.cycle_id=:cycle');$q->execute(['run'=>$runId,'cycle'=>$cycleId]);$run=$q->fetch(PDO::FETCH_ASSOC);if(!$run)throw new \RuntimeException('Scheduling run not found.');
+        $q=$pdo->prepare("SELECT sri.*,e.is_locked,pc.subject_priority,pc.semester,c.code AS course_code,c.name AS course_name,p.code AS programme_code,p.name AS programme_name,es.name AS shift_name,es.start_time,es.end_time FROM scheduling_run_items sri LEFT JOIN examinations e ON e.id=sri.examination_id JOIN programme_courses pc ON pc.id=sri.programme_course_id JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN exam_shifts es ON es.id=sri.shift_id WHERE sri.scheduling_run_id=:run ORDER BY sri.item_status,sri.assigned_date,es.sequence_no,p.code,pc.semester,pc.subject_priority");$q->execute(['run'=>$runId]);$items=$q->fetchAll(PDO::FETCH_ASSOC);
+        $q=$pdo->prepare("SELECT * FROM scheduling_conflicts WHERE scheduling_run_id=:run AND severity<>'pass' ORDER BY FIELD(severity,'blocked','warning'),id");$q->execute(['run'=>$runId]);$conflicts=$q->fetchAll(PDO::FETCH_ASSOC);$q=$pdo->prepare('SELECT id,name,start_time,end_time FROM exam_shifts WHERE cycle_id=:cycle ORDER BY sequence_no');$q->execute(['cycle'=>$cycleId]);$shifts=$q->fetchAll(PDO::FETCH_ASSOC);$q=$pdo->prepare('SELECT exam_date FROM exam_calendar_dates WHERE cycle_id=:cycle AND is_exam_day=1 ORDER BY exam_date');$q->execute(['cycle'=>$cycleId]);$finalValidation=(new SchedulePublicationService($pdo))->finalChecks($runId);return compact('run','items','conflicts','shifts','finalValidation')+['dates'=>$q->fetchAll(PDO::FETCH_COLUMN),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+    }
+
+    private function lockAutomaticPaper(Request $request,int $cycleId,int $runId,int $examId):Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));try{(new ScheduleReviewService($this->database->connection()))->setLock($runId,$examId,(bool)$request->input('locked'),(int)$this->auth->user()['id']);$this->session->flash('success',$request->input('locked')?'Paper locked. It will be preserved during regeneration.':'Paper unlocked.');}catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));
+    }
+
+    private function moveAutomaticPaper(Request $request,int $cycleId,int $runId,int $examId):Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));try{(new ScheduleReviewService($this->database->connection()))->move($runId,$examId,(string)$request->input('exam_date'),(int)$request->input('shift_id'),(int)$this->auth->user()['id']);$this->session->flash('success','Paper moved after all hard constraints were validated.');}catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));
+    }
+
+    private function regenerateAutomaticSchedule(Request $request,int $cycleId,int $runId):Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));try{$review=new ScheduleReviewService($this->database->connection());$newRun=$review->prepareRegeneration($runId,(int)$this->auth->user()['id']);$result=(new AutomaticScheduler($this->database->connection()))->generate($newRun,(int)$this->auth->user()['id']);$this->session->flash('success',"New run #{$newRun}: {$result['scheduled']} unlocked papers regenerated; locked papers were preserved.");return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$newRun}"));}catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));}
+    }
+
+    private function automaticCompareData(int $cycleId,int $runId):array
+    {
+        $pdo=$this->database->connection();$q=$pdo->prepare("SELECT * FROM scheduling_runs WHERE id=:run AND cycle_id=:cycle AND status='generated'");$q->execute(['run'=>$runId,'cycle'=>$cycleId]);$current=$q->fetch(PDO::FETCH_ASSOC);if(!$current)throw new \RuntimeException('Generated scheduling run not found.');$q=$pdo->prepare("SELECT * FROM scheduling_runs WHERE cycle_id=:cycle AND school_id=:school AND status='generated' AND id<:run ORDER BY id DESC LIMIT 1");$q->execute(['cycle'=>$cycleId,'school'=>$current['school_id'],'run'=>$runId]);$previous=$q->fetch(PDO::FETCH_ASSOC);$load=function(int $id)use($pdo):array{$q=$pdo->prepare("SELECT sri.*,pc.programme_id,pc.semester,c.code AS course_code,p.code AS programme_code,es.name AS shift_name FROM scheduling_run_items sri JOIN programme_courses pc ON pc.id=sri.programme_course_id JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN exam_shifts es ON es.id=sri.shift_id WHERE sri.scheduling_run_id=:run");$q->execute(['run'=>$id]);$map=[];foreach($q as $item)$map[$item['programme_id'].'-'.$item['semester'].'-'.$item['course_code']]=$item;return $map;};$currentItems=$load($runId);$previousItems=$previous?$load((int)$previous['id']):[];$changes=[];foreach(array_unique(array_merge(array_keys($currentItems),array_keys($previousItems))) as $key){$before=$previousItems[$key]??null;$after=$currentItems[$key]??null;$state=!$before?'added':(!$after?'removed':(($before['assigned_date']===$after['assigned_date']&&$before['shift_id']===$after['shift_id'])?'unchanged':'moved'));$changes[]=compact('key','before','after','state');}return compact('current','previous','changes');
+    }
+
+    private function approveAutomaticSchedule(Request $request,int $cycleId,int $runId):Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));try{(new SchedulePublicationService($this->database->connection()))->approve($runId,(int)$this->auth->user()['id']);$this->session->flash('success','Scheduling run approved after final validation.');}catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));
+    }
+
+    private function publishAutomaticSchedule(Request $request,int $cycleId,int $runId):Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));try{(new SchedulePublicationService($this->database->connection()))->publish($runId,(int)$this->auth->user()['id']);$this->session->flash('success','The approved date sheet is now published and available to downstream seating operations.');}catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));
+    }
+
+    private function automaticRunCsv(int $cycleId,int $runId):Response
+    {
+        $data=$this->automaticRunData($cycleId,$runId);$handle=fopen('php://temp','r+');fputcsv($handle,['Programme','Semester','Subject Code','Subject Name','Priority','Exam Date','Shift','Eligible Students','Status','Placement Reason']);foreach($data['items'] as $item)fputcsv($handle,[$item['programme_code'],(int)$item['semester'],$item['course_code'],$item['course_name'],(int)$item['subject_priority'],$item['assigned_date'],$item['shift_name'],(int)$item['eligible_count'],$item['item_status'],$item['reason']]);rewind($handle);$csv=stream_get_contents($handle);fclose($handle);return Response::csv((string)$csv,'gbu-date-sheet-run-'.$runId.'.csv');
     }
 
     private function stageDateSheetImport(Request $request,int $cycleId): Response

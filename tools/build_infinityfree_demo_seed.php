@@ -6,7 +6,7 @@ $root = dirname(__DIR__);
 $studentCsv = $root . '/storage/demo-data/large-multi-branch/students_large_multi_branch.csv';
 $facultyCsv = $root . '/storage/demo-data/large-multi-branch/faculty_large_all_schools.csv';
 $courseCsv = $root . '/storage/demo-data/btech_cse_2022_23_curriculum_upload.csv';
-$output = $root . '/database/infinityfree_demo_data_seed.sql';
+$output = $root . '/storage/demo-data/infinityfree_demo_data_seed.sql';
 
 /** @return list<array<string,string>> */
 function csvRows(string $path): array
@@ -66,11 +66,11 @@ $programmes = [
     ['ICT','PCS','M.Tech Computer Science and Engineering','postgraduate',4,0,0],
     ['ICT','PCW','M.Tech CSE Working Professional','postgraduate',4,0,0],
     ['ICT','ICS','Integrated B.Tech Computer Science and Engineering','integrated',10,0,1],
-    ['SOE','UEC','B.Tech Electronics and Communication Engineering','undergraduate',8,0,0],
-    ['SOE','UVL','B.Tech ECE VLSI Design and Embedded Systems','undergraduate',8,0,0],
-    ['SOE','UEA','B.Tech ECE Artificial Intelligence and Machine Learning','undergraduate',8,0,0],
-    ['SOE','LEA','ECE AI and ML Lateral Entry','undergraduate',6,1,0],
-    ['SOE','IEC','Integrated Electronics and Communication Engineering','integrated',10,0,1],
+    ['ICT','UEC','B.Tech Electronics and Communication Engineering','undergraduate',8,0,0],
+    ['ICT','UVL','B.Tech ECE VLSI Design and Embedded Systems','undergraduate',8,0,0],
+    ['ICT','UEA','B.Tech ECE Artificial Intelligence and Machine Learning','undergraduate',8,0,0],
+    ['ICT','LEA','ECE AI and ML Lateral Entry','undergraduate',6,1,0],
+    ['ICT','IEC','Integrated Electronics and Communication Engineering','integrated',10,0,1],
 ];
 
 $studentRows = csvRows($studentCsv);
@@ -150,4 +150,3 @@ $sql .= "SELECT COUNT(*) AS ucs_curriculum_mappings FROM programme_courses pc JO
 
 file_put_contents($output, $sql);
 fwrite(STDOUT, "Created {$output}\nStudents: " . count($studentRows) . "\nFaculty: " . count($facultyRows) . "\nCurriculum rows: " . count($courseRows) . "\n");
-

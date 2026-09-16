@@ -85,6 +85,13 @@ CREATE TABLE programme_courses (
   course_id BIGINT UNSIGNED NOT NULL,
   semester TINYINT UNSIGNED NULL,
   category ENUM('core','elective','bridge','common','back_paper','other') NOT NULL DEFAULT 'core',
+  course_credits DECIMAL(4,1) NOT NULL DEFAULT 0.0,
+  course_level ENUM('UG','PG') NOT NULL DEFAULT 'UG',
+  course_year TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  mid_sem_duration_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 90,
+  end_sem_duration_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 180,
+  subject_priority SMALLINT UNSIGNED NOT NULL DEFAULT 50,
+  KEY idx_programme_courses_priority (programme_id, semester, subject_priority),
   UNIQUE KEY uq_programme_course_semester (programme_id, course_id, semester),
   CONSTRAINT fk_programme_courses_programme FOREIGN KEY (programme_id) REFERENCES programmes(id),
   CONSTRAINT fk_programme_courses_course FOREIGN KEY (course_id) REFERENCES courses(id)
@@ -206,9 +213,49 @@ CREATE TABLE exam_calendar_dates (
   cycle_id BIGINT UNSIGNED NOT NULL,
   exam_date DATE NOT NULL,
   is_exam_day TINYINT(1) NOT NULL DEFAULT 1,
+  day_type ENUM('exam_day','sunday','holiday','restricted_holiday','preparation_day','blocked') NOT NULL DEFAULT 'exam_day',
   note VARCHAR(255) NULL,
   UNIQUE KEY uq_cycle_calendar_date (cycle_id, exam_date),
   CONSTRAINT fk_calendar_cycle FOREIGN KEY (cycle_id) REFERENCES exam_cycles(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE scheduling_rules (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cycle_id BIGINT UNSIGNED NOT NULL,
+  school_id BIGINT UNSIGNED NOT NULL,
+  minimum_gap_days TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  maximum_papers_per_day TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  avoid_consecutive_days TINYINT(1) NOT NULL DEFAULT 1,
+  use_subject_priority TINYINT(1) NOT NULL DEFAULT 1,
+  created_by BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_scheduling_rule_scope (cycle_id, school_id),
+  CONSTRAINT fk_scheduling_rules_cycle FOREIGN KEY (cycle_id) REFERENCES exam_cycles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_scheduling_rules_school FOREIGN KEY (school_id) REFERENCES schools(id),
+  CONSTRAINT fk_scheduling_rules_user FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE scheduling_runs (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  cycle_id BIGINT UNSIGNED NOT NULL,
+  school_id BIGINT UNSIGNED NOT NULL,
+  status ENUM('validating','ready','generating','generated','approved','published','failed','discarded') NOT NULL DEFAULT 'validating',
+  rule_snapshot LONGTEXT NOT NULL,
+  validation_summary LONGTEXT NULL,
+  generated_paper_count INT UNSIGNED NOT NULL DEFAULT 0,
+  created_by BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME NULL,
+  approved_by BIGINT UNSIGNED NULL,
+  approved_at DATETIME NULL,
+  published_by BIGINT UNSIGNED NULL,
+  published_at DATETIME NULL,
+  CONSTRAINT fk_scheduling_runs_cycle FOREIGN KEY (cycle_id) REFERENCES exam_cycles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_scheduling_runs_school FOREIGN KEY (school_id) REFERENCES schools(id),
+  CONSTRAINT fk_scheduling_runs_user FOREIGN KEY (created_by) REFERENCES users(id),
+  CONSTRAINT fk_scheduling_runs_approved_user FOREIGN KEY (approved_by) REFERENCES users(id),
+  CONSTRAINT fk_scheduling_runs_published_user FOREIGN KEY (published_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE examinations (
@@ -220,6 +267,9 @@ CREATE TABLE examinations (
   category ENUM('regular','repeat','back_paper','special','pass_out','not_promoted') NOT NULL DEFAULT 'regular',
   status ENUM('draft','published','completed','cancelled') NOT NULL DEFAULT 'draft',
   notes TEXT NULL,
+  generation_source ENUM('manual','import','automatic') NOT NULL DEFAULT 'manual',
+  generated_by_run_id BIGINT UNSIGNED NULL,
+  is_locked TINYINT(1) NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_exam_cycle_course_slot (cycle_id, course_id, exam_date, shift_id, category),
@@ -227,6 +277,7 @@ CREATE TABLE examinations (
   CONSTRAINT fk_examinations_cycle FOREIGN KEY (cycle_id) REFERENCES exam_cycles(id),
   CONSTRAINT fk_examinations_shift FOREIGN KEY (shift_id) REFERENCES exam_shifts(id),
   CONSTRAINT fk_examinations_course FOREIGN KEY (course_id) REFERENCES courses(id)
+  ,CONSTRAINT fk_examinations_run FOREIGN KEY (generated_by_run_id) REFERENCES scheduling_runs(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
 CREATE TABLE examination_cohorts (
@@ -251,6 +302,36 @@ CREATE TABLE exam_eligibility (
   UNIQUE KEY uq_exam_student_eligibility (examination_id, student_id),
   CONSTRAINT fk_eligibility_exam FOREIGN KEY (examination_id) REFERENCES examinations(id) ON DELETE CASCADE,
   CONSTRAINT fk_eligibility_student FOREIGN KEY (student_id) REFERENCES students(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE scheduling_run_items (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  scheduling_run_id BIGINT UNSIGNED NOT NULL,
+  examination_id BIGINT UNSIGNED NULL,
+  programme_course_id BIGINT UNSIGNED NOT NULL,
+  assigned_date DATE NULL,
+  shift_id BIGINT UNSIGNED NULL,
+  item_status ENUM('pending','scheduled','unscheduled','locked') NOT NULL DEFAULT 'pending',
+  score DECIMAL(10,3) NULL,
+  reason VARCHAR(255) NULL,
+  CONSTRAINT fk_scheduling_items_run FOREIGN KEY (scheduling_run_id) REFERENCES scheduling_runs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_scheduling_items_exam FOREIGN KEY (examination_id) REFERENCES examinations(id) ON DELETE SET NULL,
+  CONSTRAINT fk_scheduling_items_curriculum FOREIGN KEY (programme_course_id) REFERENCES programme_courses(id),
+  CONSTRAINT fk_scheduling_items_shift FOREIGN KEY (shift_id) REFERENCES exam_shifts(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE scheduling_conflicts (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  scheduling_run_id BIGINT UNSIGNED NOT NULL,
+  severity ENUM('pass','warning','blocked') NOT NULL,
+  conflict_code VARCHAR(80) NOT NULL,
+  entity_type VARCHAR(60) NULL,
+  entity_id BIGINT UNSIGNED NULL,
+  message VARCHAR(255) NOT NULL,
+  details LONGTEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_scheduling_conflicts_run (scheduling_run_id,severity),
+  CONSTRAINT fk_scheduling_conflicts_run FOREIGN KEY (scheduling_run_id) REFERENCES scheduling_runs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE seating_allocations (

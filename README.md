@@ -46,12 +46,12 @@ The system is designed for Gautam Buddha University and follows its school, prog
 |---|---|
 | Dashboard | Operational statistics, quick actions and role-aware navigation |
 | Academic masters | Schools, departments, programmes, batches and programme codes |
-| Curriculum | Subject/course master, subject code, programme, semester and category mapping |
+| Course structure | Course name, code, credits, UG/PG level, academic year, semester, mid/end-semester duration, category and scheduling priority by programme |
 | Students | Individual records, large CSV/XLSX import, validation preview and programme detection |
 | Faculty | Faculty master, bulk import, school association and availability |
 | Rooms | Bulk room import, row/column geometry, visual layout, priority and disabled seats |
 | Examination cycles | Academic session, examination type, calendar dates, shifts and lifecycle status |
-| Date sheets | Manual scheduling, bulk import, programme/semester mapping and conflict validation |
+| Date sheets | Manual/import scheduling, school-wise automatic generation, holidays, gaps, priorities, validation, locking, regeneration, approval, publication and CSV export |
 | Seating | Versioned generation, room capacity use, seat allocation and unallocated-student reporting |
 | Attendance | Room-wise attendance sheets, marking and correction support |
 | Invigilation | Faculty duty allocation, session conflict control and workload tracking |
@@ -265,7 +265,7 @@ Each room defines rows, columns and either `row_major` or `column_major` allocat
 
 ## Database design
 
-The current schema contains **30 tables** grouped into these domains:
+The current schema contains **34 tables** grouped into these domains:
 
 | Domain | Principal tables |
 |---|---|
@@ -273,7 +273,7 @@ The current schema contains **30 tables** grouped into these domains:
 | Academic masters | `schools`, `departments`, `programmes`, `batches`, `courses`, `programme_courses` |
 | People | `students`, `faculty`, `faculty_availability` |
 | Physical infrastructure | `rooms`, `room_seats` |
-| Examination planning | `exam_cycles`, `exam_shifts`, `exam_calendar_dates`, `examinations`, `examination_cohorts`, `exam_eligibility` |
+| Examination planning | `exam_cycles`, `exam_shifts`, `exam_calendar_dates`, `examinations`, `examination_cohorts`, `exam_eligibility`, `scheduling_rules`, `scheduling_runs`, `scheduling_run_items`, `scheduling_conflicts` |
 | Seating | `seating_allocations`, `seating_assignments`, `seating_unallocated` |
 | Operations | `invigilation_allocations`, `attendance`, `replacement_requests` |
 | Imports | `import_batches`, `import_rows`, `import_errors` |
@@ -300,13 +300,11 @@ The canonical sources are [`database/schema.sql`](database/schema.sql) and [`dat
 C:\xampp\php\php.exe database\install.php admin "a-strong-password-of-at-least-12-characters"
 ```
 
-5. Apply upgrade scripts when updating an existing installation:
+5. For a fresh manual installation, import the two canonical SQL files in this order:
 
 ```powershell
-C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/htdocs/Auto-Exam-Main/database/upgrade_001_import_rows.sql"
-C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/htdocs/Auto-Exam-Main/database/upgrade_002_seating_unallocated.sql"
-C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/htdocs/Auto-Exam-Main/database/upgrade_003_student_profile.sql"
-C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/htdocs/Auto-Exam-Main/database/upgrade_004_course_curriculum.sql"
+C:\xampp\mysql\bin\mysql.exe -u root -e "source C:/xampp/htdocs/Auto-Exam-Main/database/schema.sql"
+C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/htdocs/Auto-Exam-Main/database/seed.sql"
 ```
 
 6. Open [http://localhost/Auto-Exam-Main/public/](http://localhost/Auto-Exam-Main/public/).
@@ -348,14 +346,7 @@ For a clean hosted installation, select the provider-assigned database in phpMyA
 
 ## Demo data
 
-Optional repeatable phpMyAdmin seeds are provided:
-
-| Seed | Contents |
-|---|---|
-| [`database/infinityfree_demo_data_seed.sql`](database/infinityfree_demo_data_seed.sql) | 340 students, 64 faculty, 17 programme codes and B.Tech CSE curriculum |
-| [`database/infinityfree_room_seed.sql`](database/infinityfree_room_seed.sql) | 20 proposed rooms, 1,060 seats, 33 disabled seats and 1,027 usable seats |
-
-Demo room records are explicitly marked **“Proposed demo room — verify with GBU”** and must be confirmed before operational use.
+CSV demonstration datasets remain available under `storage/demo-data`. Database installation uses only the canonical `database/schema.sql` and `database/seed.sql` files.
 
 ## Testing
 
@@ -374,6 +365,7 @@ C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\CourseImpo
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\RoomImportTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\BTechCseCurriculumDatasetTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\EndToEndTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\AutomaticSchedulingTest.php
 ```
 
 Database-backed tests create isolated temporary databases and remove them after completion.
@@ -401,4 +393,3 @@ Print actions use the browser print dialog; choose **Save as PDF** for official 
   <strong>Gautam Buddha University — Examination Operations</strong><br>
   Greater Noida, Uttar Pradesh, India
 </div>
-

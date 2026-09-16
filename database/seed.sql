@@ -56,6 +56,16 @@ SELECT id, 'LEA', 'ECE AI and ML Lateral Entry', 'undergraduate', 6, 1, 0, 'acti
 INSERT IGNORE INTO programmes (school_id, code, name, level, duration_semesters, lateral_entry, legacy, status)
 SELECT id, 'IEC', 'Integrated Electronics and Communication Engineering', 'integrated', 10, 0, 1, 'active' FROM schools WHERE code='SOE';
 
+-- Repair known GBU programme ownership when this repeatable seed is imported
+-- over an existing database containing older or manually misassigned records.
+UPDATE programmes SET school_id=(SELECT id FROM schools WHERE code='ICT' LIMIT 1)
+WHERE code IN ('UCS','UCM','UCD','UCC','UAI','UIT','UCA','LCS','LIT','PCS','PCW','ICS')
+  AND EXISTS (SELECT 1 FROM schools WHERE code='ICT');
+-- The supplied SOICT May 2026 date sheet includes Electronics and Communication.
+UPDATE programmes SET school_id=(SELECT id FROM schools WHERE code='ICT' LIMIT 1)
+WHERE code IN ('UEC','UVL','UEA','LEA','IEC')
+  AND EXISTS (SELECT 1 FROM schools WHERE code='ICT');
+
 -- B.Tech Computer Science and Engineering (UCS), Self Finance curriculum
 -- Effective from session 2022-23, 29th BOS dated 25 March 2023.
 -- A short-lived regular staging table is used because some shared hosts do not

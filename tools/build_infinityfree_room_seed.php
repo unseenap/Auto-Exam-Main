@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 $source = $root . '/storage/demo-data/large-multi-branch/gbu_rooms_proposed_demo.csv';
-$output = $root . '/database/infinityfree_room_seed.sql';
+$output = $root . '/storage/demo-data/infinityfree_room_seed.sql';
 
 function sqlString(?string $value): string
 {
@@ -108,4 +108,3 @@ $sql .= "SELECT SUM(physical_capacity) AS physical_capacity,SUM(usable_capacity)
 
 file_put_contents($output, $sql);
 fwrite(STDOUT, "Created {$output}\nRooms: " . count($rooms) . "\nSeats: {$totalSeats}\nDisabled: {$totalBlocked}\nUsable: " . ($totalSeats - $totalBlocked) . "\n");
-
