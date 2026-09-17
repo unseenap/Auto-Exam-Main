@@ -50,7 +50,15 @@ final class AutomaticScheduler
             foreach($existing as $fixed)if(in_array((int)$fixed['programme_id'],$programmeIds,true)&&in_array((int)$fixed['semester'],$semesters,true)&&$fixed['programme_course_id'])$addItem->execute(['run'=>$runId,'exam'=>$fixed['examination_id'],'curriculum'=>$fixed['programme_course_id'],'date'=>$fixed['exam_date'],'shift'=>$fixed['shift_id'],'status'=>$fixed['is_locked']?'locked':'scheduled','score'=>1000,'reason'=>'Existing placement preserved from the previous run.']);
             foreach($tasks as $task){
                 $cohortKey=$task['programme_id'].'-'.$task['semester'];$chosen=null;$datePosition=0;
-                foreach($dates as $date){$datePosition++;
+                // Preferences are relaxed progressively, but the hard rule remains:
+                // one paper per cohort in a single date/shift position.
+                $strategies=[['gap'=>$minimumGap,'daily'=>$maximumPerDay]];
+                if($minimumGap>0)$strategies[]=['gap'=>0,'daily'=>$maximumPerDay];
+                $physicalDailyCapacity=count($shifts);
+                if($physicalDailyCapacity>$maximumPerDay)$strategies[]=['gap'=>0,'daily'=>$physicalDailyCapacity];
+                foreach($strategies as $strategy){$appliedGap=$strategy['gap'];$appliedDailyMaximum=$strategy['daily'];
+                  $datePosition=0;
+                  foreach($dates as $date){$datePosition++;
                     foreach($shifts as $shift){
                         $slot=$date.'-'.$shift['id'];
                         $duration=max(array_column($pendingByCourse[$task['course_id']],$run['exam_type']==='mid_sem'?'mid_sem_duration_minutes':'end_sem_duration_minutes'));
@@ -60,20 +68,22 @@ final class AutomaticScheduler
                         foreach($pendingByCourse[$task['course_id']] as $affected){
                             $key=$affected['programme_id'].'-'.$affected['semester'];
                             if(isset($covered[$key.'-'.$task['course_id']]))continue;
-                            if(($cohortDaily[$key][$date]??0)>=$maximumPerDay||isset($cohortSlots[$key][$slot])){$valid=false;break;}
+                            if(($cohortDaily[$key][$date]??0)>=$appliedDailyMaximum||isset($cohortSlots[$key][$slot])){$valid=false;break;}
                             foreach($cohortDates[$key]??[] as $placed){
                                 $difference=(int)(new DateTimeImmutable($date))->diff(new DateTimeImmutable($placed))->days;
-                                if(($difference===0&&$minimumGap>0)||($difference>0&&$difference<=$minimumGap)){$valid=false;break;}
+                                if(($difference===0&&$appliedGap>0)||($difference>0&&$difference<=$appliedGap)){$valid=false;break;}
                             }
                             if(!$valid)break;
                         }
-                        if($valid){$chosen=['date'=>$date,'shift_id'=>(int)$shift['id'],'score'=>1000-$datePosition*10-(int)$shift['sequence_no']];break;}
+                        if($valid){$chosen=['date'=>$date,'shift_id'=>(int)$shift['id'],'score'=>1000-$datePosition*10-(int)$shift['sequence_no'],'gap_relaxed'=>$appliedGap<$minimumGap,'daily_relaxed'=>$appliedDailyMaximum>$maximumPerDay];break;}
                     }
                     if($chosen)break;
+                  }
+                  if($chosen)break;
                 }
-                if(!$chosen){$reason="No common date and shift satisfies all affected cohorts, paper duration, existing placements, the {$minimumGap}-day gap and daily-paper limit.";$addItem->execute(['run'=>$runId,'exam'=>null,'curriculum'=>$task['programme_course_id'],'date'=>null,'shift'=>null,'status'=>'unscheduled','score'=>null,'reason'=>$reason]);$addConflict->execute(['run'=>$runId,'entity'=>$task['programme_course_id'],'message'=>$task['programme_code'].' Semester '.$task['semester'].' '.$task['code'].' could not be scheduled.','details'=>json_encode(['reason'=>$reason])]);$unscheduled++;continue;}
+                if(!$chosen){$reason='No unused date-and-shift position satisfies the hard cohort and paper-duration constraints. Add an exam day or shift.';$addItem->execute(['run'=>$runId,'exam'=>null,'curriculum'=>$task['programme_course_id'],'date'=>null,'shift'=>null,'status'=>'unscheduled','score'=>null,'reason'=>$reason]);$addConflict->execute(['run'=>$runId,'entity'=>$task['programme_course_id'],'message'=>$task['programme_code'].' Semester '.$task['semester'].' '.$task['code'].' could not be scheduled.','details'=>json_encode(['reason'=>$reason])]);$unscheduled++;continue;}
                 $slotKey=$chosen['date'].'-'.$chosen['shift_id'].'-'.$task['course_id'];
-                if(isset($occupied[$slotKey])){$examId=$occupied[$slotKey];}else{$addExam->execute(['cycle'=>$run['cycle_id'],'shift'=>$chosen['shift_id'],'course'=>$task['course_id'],'date'=>$chosen['date'],'run'=>$runId]);$examId=(int)$this->pdo->lastInsertId();}$label=$task['programme_code'].' Semester '.$task['semester'];$addCohort->execute(['exam'=>$examId,'programme'=>$task['programme_id'],'semester'=>$task['semester'],'label'=>$label]);$addItem->execute(['run'=>$runId,'exam'=>$examId,'curriculum'=>$task['programme_course_id'],'date'=>$chosen['date'],'shift'=>$chosen['shift_id'],'status'=>'scheduled','score'=>$chosen['score'],'reason'=>'Earliest valid slot for this branch/semester. Different branches may use this session concurrently.']);
+                if(isset($occupied[$slotKey])){$examId=$occupied[$slotKey];}else{$addExam->execute(['cycle'=>$run['cycle_id'],'shift'=>$chosen['shift_id'],'course'=>$task['course_id'],'date'=>$chosen['date'],'run'=>$runId]);$examId=(int)$this->pdo->lastInsertId();}$label=$task['programme_code'].' Semester '.$task['semester'];$addCohort->execute(['exam'=>$examId,'programme'=>$task['programme_id'],'semester'=>$task['semester'],'label'=>$label]);$placementReason=$chosen['daily_relaxed']?'Scheduled in an additional shift because the number of papers exceeds the preferred one-paper-per-day pattern.':($chosen['gap_relaxed']?'Scheduled after relaxing the preferred rest gap because the calendar has no spare separated slot.':'Scheduled with the requested rest gap; higher-priority subjects receive available spacing first.');$addItem->execute(['run'=>$runId,'exam'=>$examId,'curriculum'=>$task['programme_course_id'],'date'=>$chosen['date'],'shift'=>$chosen['shift_id'],'status'=>'scheduled','score'=>$chosen['score'],'reason'=>$placementReason]);
                 $cohortDates[$cohortKey][]=$chosen['date'];$cohortDaily[$cohortKey][$chosen['date']]=($cohortDaily[$cohortKey][$chosen['date']]??0)+1;$occupied[$slotKey]=$examId;$covered[$cohortKey.'-'.$task['course_id']]=true;$cohortSlots[$cohortKey][$chosen['date'].'-'.$chosen['shift_id']]=true;$commonSlots[$task['course_id']][$chosen['date'].'-'.$chosen['shift_id']]=true;$paperIds[]=$examId;$scheduled++;
             }
             $this->pdo->prepare("UPDATE scheduling_runs SET status='generated',generated_paper_count=:count,completed_at=NOW() WHERE id=:id")->execute(['count'=>$scheduled,'id'=>$runId]);
