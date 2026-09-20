@@ -1,0 +1,26 @@
+/* Automatic scheduler refinements loaded after exams.css. */
+.automatic-planner .semester-choices{grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.automatic-planner .semester-choices label{display:block;min-width:0}
+.automatic-planner .semester-choices .semester-option{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr) 20px;align-items:center;gap:9px;width:100%;height:64px;padding:9px 10px;border:1px solid #cbdad4;border-radius:10px;background:#fff;color:var(--planner-ink);text-align:left;transition:border-color .16s,background .16s,box-shadow .16s,transform .16s}
+.automatic-planner .semester-choices label:hover .semester-option{border-color:#8fb3a7;background:#f8fbfa;transform:translateY(-1px)}
+.automatic-planner .semester-choices .semester-option>i:first-child{display:grid;width:34px;height:34px;place-items:center;border-radius:8px;background:#edf4f1;color:#55786d;font-size:1rem}
+.automatic-planner .semester-choices .semester-option>span{display:grid;gap:2px;min-width:0;width:auto;height:auto;padding:0;border:0;border-radius:0;background:transparent;place-items:initial}
+.automatic-planner .semester-choices .semester-option small{color:#758680;font-size:.57rem;font-weight:750;line-height:1;text-transform:uppercase;letter-spacing:.04em}
+.automatic-planner .semester-choices .semester-option strong{color:var(--planner-ink);font-size:1rem;line-height:1.1}
+.automatic-planner .semester-choices .semester-check{display:grid;width:19px;height:19px;place-items:center;border:1px solid #c8d7d2;border-radius:50%;color:transparent;font-size:.72rem}
+.automatic-planner .semester-choices input:checked+.semester-option{border-color:var(--planner-accent);background:#edf7f3;box-shadow:inset 3px 0 var(--planner-accent),0 5px 14px rgba(31,102,83,.1)}
+.automatic-planner .semester-choices input:checked+.semester-option>i:first-child{background:var(--planner-accent);color:#fff}
+.automatic-planner .semester-choices input:checked+.semester-option .semester-check{border-color:var(--planner-accent);background:var(--planner-accent);color:#fff}
+.automatic-planner .semester-choices input:checked+.semester-option small{color:#55756b}
+@media(prefers-reduced-motion:reduce){.automatic-planner .semester-choices .semester-option{transition:none}}
+@media(max-width:760px){.automatic-planner .semester-choices{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:480px){.automatic-planner .semester-choices{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Give the validation report a real, independently scrollable grid row. */
+.automatic-planner .validation-column{position:sticky;top:92px;display:grid;grid-template-rows:auto minmax(0,1fr);max-height:calc(100dvh - 112px);min-height:0;align-self:start;overflow:hidden}
+.automatic-planner .validation-panel{min-height:0;max-height:calc(100dvh - 158px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.automatic-planner .validation-panel::-webkit-scrollbar{width:10px}
+.automatic-planner .validation-panel::-webkit-scrollbar-track{background:#eef3f1;border-radius:8px}
+.automatic-planner .validation-panel::-webkit-scrollbar-thumb{background:#8ba99f;border:2px solid #eef3f1;border-radius:8px}
+.automatic-planner .validation-panel:focus-visible{outline:3px solid rgba(31,102,83,.22);outline-offset:3px}
+@media(max-width:1120px){.automatic-planner .validation-column{position:static;display:block;max-height:none;overflow:visible}.automatic-planner .validation-panel{max-height:none;overflow:visible;scrollbar-gutter:auto}}

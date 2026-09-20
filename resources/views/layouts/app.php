@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="<?= e(url('assets/css/imports.css')) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/rooms.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/rooms.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/exams.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/exams.css'))) ?>">
+  <link rel="stylesheet" href="<?= e(url('assets/css/automatic-scheduler.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/automatic-scheduler.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/seating.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/seating.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/attendance.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/attendance.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/invigilation.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/invigilation.css'))) ?>">

@@ -706,8 +706,10 @@ final class Application
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
         $schools=$pdo->query("SELECT id,code,name,short_name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
         $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);
+        $curriculum=$pdo->query("SELECT pc.id,pc.programme_id,pc.semester,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id WHERE c.status='active' AND p.status='active' ORDER BY p.code,pc.semester,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC);
+        $curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
         $last=$this->session->pullFlash('validation_result');
-        return compact('cycle','schools','programmes')+['result'=>$last,'selection'=>$this->session->get('automatic_scope_'.$cycleId,[]),'error'=>$this->session->pullFlash('error')];
+        return compact('cycle','schools','programmes','curriculum')+['result'=>$last,'selection'=>$this->session->get('automatic_scope_'.$cycleId,[]),'error'=>$this->session->pullFlash('error')];
     }
 
     private function validateAutomaticSchedule(Request $request,int $cycleId): Response
@@ -729,7 +731,7 @@ final class Application
 
     private function automaticScope(Request $request,int $cycleId): array
     {
-        return ['cycle_id'=>$cycleId,'school_id'=>(int)$request->input('school_id'),'programme_ids'=>$_POST['programme_ids']??[],'semesters'=>$_POST['semesters']??[],'minimum_gap_days'=>(int)$request->input('minimum_gap_days',1),'maximum_papers_per_day'=>(int)$request->input('maximum_papers_per_day',1),'avoid_consecutive_days'=>$request->input('avoid_consecutive_days'),'use_subject_priority'=>$request->input('use_subject_priority')];
+        return ['cycle_id'=>$cycleId,'school_id'=>(int)$request->input('school_id'),'programme_ids'=>$_POST['programme_ids']??[],'semesters'=>$_POST['semesters']??[],'programme_course_ids'=>$_POST['programme_course_ids']??[],'subject_selection_active'=>$request->input('subject_selection_active'),'minimum_gap_days'=>(int)$request->input('minimum_gap_days',1),'maximum_papers_per_day'=>(int)$request->input('maximum_papers_per_day',1),'avoid_consecutive_days'=>$request->input('avoid_consecutive_days'),'use_subject_priority'=>$request->input('use_subject_priority')];
     }
 
     private function generateAutomaticSchedule(Request $request,int $cycleId): Response
