@@ -3,9 +3,9 @@
 
   # Automated Examination Operations Platform
 
-  **A role-governed university system for examination planning, date sheets, room layouts, seating allocation, attendance, invigilation, replacements, audit and reporting.**
+  **A role-governed university platform for curriculum management, automatic date-sheet generation, room-aware seating, attendance, invigilation, replacements, audit and reporting.**
 
-  `PHP 8.2+` · `MariaDB / MySQL` · `Responsive UI` · `CSV/XLSX Imports` · `Print-ready Reports`
+  `PHP 8.2+` · `MariaDB / MySQL` · `Responsive & Accessible UI` · `CSV/XLSX Imports` · `Deterministic Scheduling` · `Print-ready Reports`
 </div>
 
 ---
@@ -28,6 +28,7 @@ The system is designed for Gautam Buddha University and follows its school, prog
 ## Contents
 
 - [System capabilities](#system-capabilities)
+- [Automatic date-sheet scheduling](#automatic-date-sheet-scheduling)
 - [Operational workflow](#operational-workflow)
 - [Data-flow diagrams](#data-flow-diagrams)
 - [Architecture](#architecture)
@@ -51,13 +52,54 @@ The system is designed for Gautam Buddha University and follows its school, prog
 | Faculty | Faculty master, bulk import, school association and availability |
 | Rooms | Bulk room import, row/column geometry, visual layout, priority and disabled seats |
 | Examination cycles | Academic session, examination type, calendar dates, shifts and lifecycle status |
-| Date sheets | Manual/import scheduling, school-wise automatic generation, holidays, gaps, priorities, validation, locking, regeneration, approval, publication and CSV export |
+| Date sheets | Manual/import scheduling, school-wise automatic generation, branch and subject selection, holidays, flexible gaps, priorities, live validation, locking, moving, regeneration, approval, publication and CSV export |
 | Seating | Versioned generation, room capacity use, seat allocation and unallocated-student reporting |
 | Attendance | Room-wise attendance sheets, marking and correction support |
 | Invigilation | Faculty duty allocation, session conflict control and workload tracking |
 | Replacements | Replacement requests, approval status and replacement history |
 | Reports | Seating, attendance, date-sheet and operational CSV/print outputs |
 | Governance | Eight application roles, CSRF protection, session control and audit logs |
+
+## Automatic date-sheet scheduling
+
+The automatic scheduler builds one independent date-sheet line for every selected **programme/branch and semester**. Papers from different branches may use the same date and shift when their own cohort rules allow it; they are not incorrectly combined into a single branch row.
+
+### Scheduling workflow
+
+1. Create an examination cycle with its date range, examination type, paper duration and shifts.
+2. Mark Sundays, university holidays and any unavailable dates in **Calendar & holidays**.
+3. Open **Automatic scheduling** and select one school.
+4. Select only the programmes belonging to that school, followed by the required semesters.
+5. Review the written subjects loaded for each selected branch. Eligible theory papers start selected and may be included or excluded individually.
+6. Set the preferred rest gap, daily paper limit, priority handling and non-consecutive-day preference.
+7. Review live academic, calendar and feasibility checks, then save validation.
+8. Generate the draft, lock important placements, move a paper when needed or regenerate unlocked papers.
+9. Approve the reviewed run and publish the final date sheet.
+
+### Scheduling rules
+
+- Course priority uses values from 1 to 100; lower numbers are placed earlier when priority scheduling is enabled.
+- Lab and practical subjects are automatically excluded from written date sheets.
+- A requested gap is treated as a preference when the available examination window cannot accommodate it. The engine still attempts to schedule every valid selected paper.
+- Sundays and configured holidays are unavailable unless explicitly enabled as examination days.
+- Existing papers are preserved and shown during validation so a new branch can be added without silently replacing another branch's schedule.
+- Locked papers keep their placement during regeneration; unlocked papers may be recalculated.
+- Student records are not required to build a draft date sheet. Eligibility counts remain zero until matching active students exist.
+- Reopening Automatic Scheduling for an existing draft reconstructs the scope from the current database records. Its school, scheduled branches, semesters and written papers are selected automatically, including papers preserved from earlier runs.
+
+### Draft lifecycle
+
+```mermaid
+flowchart LR
+    S[Select school, branches,<br/>semesters and subjects] --> V[Live validation]
+    V -->|No blockers| G[Generate draft]
+    G --> R[Review, lock or move]
+    R -->|Changes needed| N[Regenerate unlocked papers]
+    N --> R
+    R --> A[Approve run]
+    A --> P[Publish date sheet]
+    P --> D[Seating and downstream operations]
+```
 
 ## Operational workflow
 
@@ -67,8 +109,8 @@ flowchart LR
     B --> C[Import students and faculty]
     C --> D[Create rooms and visual seat layouts]
     D --> E[Create examination cycle, dates and shifts]
-    E --> F[Schedule or import subject-wise date sheet]
-    F --> G[Generate and review seating plan]
+    E --> F[Generate, review and publish school-wise date sheet]
+    F --> G[Generate and review room-wise seating plan]
     G --> H[Publish room and attendance sheets]
     H --> I[Allocate invigilation duties]
     I --> J[Record attendance and replacements]
@@ -199,13 +241,18 @@ Auto-Exam-Main/
 │   └── View/           View rendering
 ├── bootstrap/          Application bootstrap and autoloading
 ├── config/             Application and database configuration
-├── database/           Schema, seed, upgrades and hosted demo seeds
-├── deployment/         InfinityFree packaging resources
+├── database/           Canonical schema, seed, installer and backup utility
+├── deployment/
+│   └── infinityfree/   Hosting package builder and deployment guide
+├── docs/               Scheduling design and date-sheet review notes
 ├── public/             Web entry point, CSS, JavaScript, icons and branding
-├── resources/views/    Server-rendered application screens
-├── storage/            Runtime data and import templates
+├── resources/views/    Accessible server-rendered application screens
+├── storage/            Imports, exports, logs and demonstration datasets
 ├── tests/              Unit, integration and end-to-end verification
-└── tools/              Repeatable dataset and deployment builders
+├── tools/              Repeatable dataset and deployment builders
+├── OPERATOR_GUIDE.md   Day-to-day operator instructions
+├── DEPLOYMENT.md       Deployment overview
+└── README.md           Project overview and setup guide
 ```
 
 ## Roles and access
@@ -278,7 +325,7 @@ The current schema contains **34 tables** grouped into these domains:
 | Operations | `invigilation_allocations`, `attendance`, `replacement_requests` |
 | Imports | `import_batches`, `import_rows`, `import_errors` |
 
-The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql).
+The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean installation: import the schema first and the seed second. The schema already contains the complete automatic-scheduling structure, including priorities, rules, runs, run items and conflicts.
 
 ## Local installation
 
@@ -307,7 +354,7 @@ C:\xampp\mysql\bin\mysql.exe -u root -e "source C:/xampp/htdocs/Auto-Exam-Main/d
 C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/htdocs/Auto-Exam-Main/database/seed.sql"
 ```
 
-6. Open [http://localhost/Auto-Exam-Main/public/](http://localhost/Auto-Exam-Main/public/).
+6. Open [http://localhost/Auto-Exam-Main/public/](http://localhost/Auto-Exam-Main/public/). The login route is [http://localhost/Auto-Exam-Main/public/login](http://localhost/Auto-Exam-Main/public/login).
 
 ### Environment configuration
 
@@ -346,7 +393,14 @@ For a clean hosted installation, select the provider-assigned database in phpMyA
 
 ## Demo data
 
-CSV demonstration datasets remain available under `storage/demo-data`. Database installation uses only the canonical `database/schema.sql` and `database/seed.sql` files.
+CSV demonstration datasets remain available under `storage/demo-data`, including large multi-branch students, faculty, course structures and room-layout examples. Database installation uses only the canonical `database/schema.sql` and `database/seed.sql` files.
+
+Use the application import screens for operational data:
+
+- **Students** — identifiers, session, programme, school, semester, section and contact information.
+- **Faculty** — faculty identity, school association and availability data.
+- **Courses** — programme/branch, subject code and name, credits, UG/PG level, course year, semester, category, examination duration and priority.
+- **Rooms** — room geometry, allocation order, priority and optional disabled seat coordinates.
 
 ## Testing
 

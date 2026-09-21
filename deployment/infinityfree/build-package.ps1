@@ -67,7 +67,17 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 '@
 $sqlFooter = "`r`nSET FOREIGN_KEY_CHECKS = 1;`r`n"
+$schemaContent = $sqlHeader + $dropStatements + "`r`n`r`n" + ($portableSchema -join "`r`n") + $sqlFooter
+$seedContent = @'
+-- GBU Examination Operations: InfinityFree seed data
+-- Import this only after infinityfree_schema.sql, with the assigned database selected.
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+'@ + ($seed -join "`r`n") + $adminSql + $sqlFooter
 $sqlContent = $sqlHeader + $dropStatements + "`r`n`r`n" + ($portableSchema -join "`r`n") + "`r`n`r`n" + ($seed -join "`r`n") + $adminSql + $sqlFooter
+Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_schema.sql') -Value $schemaContent -Encoding utf8
+Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_seed.sql') -Value $seedContent -Encoding utf8
 Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_database_import.sql') -Value $sqlContent -Encoding utf8
 
 $credentials = @'
