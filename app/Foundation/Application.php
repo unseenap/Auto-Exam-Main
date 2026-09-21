@@ -709,7 +709,18 @@ final class Application
         $curriculum=$pdo->query("SELECT pc.id,pc.programme_id,pc.semester,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id WHERE c.status='active' AND p.status='active' ORDER BY p.code,pc.semester,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC);
         $curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
         $last=$this->session->pullFlash('validation_result');
-        return compact('cycle','schools','programmes','curriculum')+['result'=>$last,'selection'=>$this->session->get('automatic_scope_'.$cycleId,[]),'error'=>$this->session->pullFlash('error')];
+        $selection=$this->session->get('automatic_scope_'.$cycleId,[]);
+        $runQuery=$pdo->prepare("SELECT id,school_id,rule_snapshot FROM scheduling_runs WHERE cycle_id=:cycle AND status IN ('ready','generated','approved','published','failed') ORDER BY id DESC LIMIT 1");$runQuery->execute(['cycle'=>$cycleId]);$savedRun=$runQuery->fetch(PDO::FETCH_ASSOC);
+        if($savedRun){
+            $snapshot=json_decode((string)$savedRun['rule_snapshot'],true)?:[];
+            $itemQuery=$pdo->prepare("SELECT DISTINCT pc.id AS programme_course_id,cohort.programme_id,cohort.semester FROM examinations e JOIN examination_cohorts cohort ON cohort.examination_id=e.id JOIN programmes p ON p.id=cohort.programme_id JOIN programme_courses pc ON pc.programme_id=cohort.programme_id AND pc.course_id=e.course_id AND pc.semester=cohort.semester WHERE e.cycle_id=:cycle AND p.school_id=:school AND e.status<>'cancelled'");$itemQuery->execute(['cycle'=>$cycleId,'school'=>$savedRun['school_id']]);$savedItems=$itemQuery->fetchAll(PDO::FETCH_ASSOC);
+            $savedProgrammeIds=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'programme_id'):($snapshot['programme_ids']??[]))));
+            $savedSemesters=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'semester'):($snapshot['semesters']??[]))));
+            $savedCourseIds=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'programme_course_id'):($snapshot['programme_course_ids']??[]))));
+            $selection=['cycle_id'=>$cycleId,'school_id'=>(int)$savedRun['school_id'],'programme_ids'=>$savedProgrammeIds,'semesters'=>$savedSemesters,'programme_course_ids'=>$savedCourseIds,'subject_selection_active'=>1,'minimum_gap_days'=>(int)($snapshot['minimum_gap_days']??1),'maximum_papers_per_day'=>(int)($snapshot['maximum_papers_per_day']??1),'avoid_consecutive_days'=>!empty($snapshot['avoid_consecutive_days'])?1:null,'use_subject_priority'=>!empty($snapshot['use_subject_priority'])?1:null,'restored_run_id'=>(int)$savedRun['id']];
+            $this->session->put('automatic_scope_'.$cycleId,$selection);
+        }
+        return compact('cycle','schools','programmes','curriculum','selection')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
     }
 
     private function validateAutomaticSchedule(Request $request,int $cycleId): Response
