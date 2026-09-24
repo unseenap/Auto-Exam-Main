@@ -143,7 +143,7 @@ final class Application
         if (preg_match('#^/rooms/(\d+)/layout$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/layout',$this->roomLayoutData((int)$matches[1])));
         if($path==='/exam-cycles'&&$method==='POST')return $this->saveExamCycle($request);
         if(preg_match('#^/exam-cycles/(\\d+)/delete(?:/(confirm))?$#',$path,$matches)===1&&in_array($method,['GET','POST'],true))return $this->deleteExamCycle($request,(int)$matches[1],$method,$matches[2]??'');
-        if($path==='/date-sheets/template.csv'&&$method==='GET')return Response::csv("Exam Date,Shift,Course Code,Course Name,Programme Code,Semester,Category,Display Label,Batch Label,Roll Numbers\r\n2026-05-14,1,MA112,Applied Mathematics-II,UCS,2,regular,B.Tech CSE Semester 2,,\r\n2026-05-14,1,MA112,Applied Mathematics-II,ICS,2,regular,Integrated CSE Semester 2,,\r\n",'gbu-date-sheet-template.csv');
+        if($path==='/date-sheets/template.csv'&&$method==='GET')return Response::csv("Exam Date,Shift,Course Code,Course Name,Programme Code,Batch Label,Semester,Section,Category,Display Label,Roll Numbers\r\n2026-05-14,1,MA112,Applied Mathematics-II,UCS,UCS 2023-2027,2,ALL,regular,UCS 2023-2027 Semester 2,\r\n2026-05-14,1,MA112,Applied Mathematics-II,ICS,ICS 2023-2028,2,A,regular,ICS 2023-2028 Semester 2 Section A,\r\n",'gbu-date-sheet-template.csv');
         if(preg_match('#^/exam-cycles/(\d+)/calendar$#',$path,$matches)===1&&$method==='POST')return $this->saveExamCalendar($request,(int)$matches[1]);
         if(preg_match('#^/exam-cycles/(\d+)/calendar$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/calendar',$this->examCalendarData((int)$matches[1])));
         if($path==='/courses'&&$method==='POST')return $this->saveCourse($request);
@@ -187,6 +187,8 @@ final class Application
         if($path==='/reports/unallocated.csv'&&$method==='GET')return $this->unallocatedCsv();
         if($path==='/masters/schools'&&$method==='POST')return $this->saveSchool($request);
         if($path==='/masters/programmes'&&$method==='POST')return $this->saveProgramme($request);
+        if(preg_match('#^/masters/programmes/(\d+)/duration$#',$path,$matches)===1&&$method==='POST')return $this->saveProgrammeDuration($request,(int)$matches[1]);
+        if($path==='/masters/batches'&&$method==='POST')return $this->saveBatch($request);
         if($path==='/faculty/availability'&&$method==='POST')return $this->saveFacultyAvailability($request);
         if($path==='/users'&&$method==='POST')return $this->saveUser($request);
         if(preg_match('#^/users/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->saveUser($request,(int)$matches[1]);
@@ -195,6 +197,7 @@ final class Application
             '/dashboard' => Response::html(View::render('dashboard', $this->dashboardData())),
             '/masters/schools' => Response::html(View::render('masters/schools', $this->schoolData())),
             '/masters/programmes' => Response::html(View::render('masters/programmes', $this->programmeData())),
+            '/masters/batches' => Response::html(View::render('masters/batches', $this->batchData($request))),
             '/students' => Response::html(View::render('students/index', $this->studentData($request))),
             '/students/create' => Response::html(View::render('students/form', $this->studentFormData())),
             '/students/import' => Response::html(View::render('students/import')),
@@ -205,7 +208,7 @@ final class Application
             '/rooms/create' => Response::html(View::render('rooms/form',$this->roomFormData())),
             '/rooms/import' => Response::html(View::render('rooms/import')),
             '/exam-cycles' => Response::html(View::render('exams/cycles',$this->examCycleData())),
-            '/exam-cycles/create' => Response::html(View::render('exams/cycle-form')),
+            '/exam-cycles/create' => Response::html(View::render('exams/cycle-form',$this->examCycleFormData())),
             '/courses' => Response::html(View::render('exams/courses',$this->courseData())),
             '/courses/import' => Response::html(View::render('exams/course-import',['error'=>$this->session->pullFlash('error')])),
             '/seating' => Response::html(View::render('seating/index',$this->seatingData())),
@@ -274,22 +277,32 @@ final class Application
         return compact('programmes','schools')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
+    private function batchData(Request $request): array
+    {
+        $programmeId=(int)$request->input('programme_id',0);$status=trim((string)$request->input('status'));
+        $where=['1=1'];$params=[];if($programmeId){$where[]='b.programme_id=:programme';$params['programme']=$programmeId;}if(in_array($status,['active','completed','inactive'],true)){$where[]='b.status=:status';$params['status']=$status;}
+        $q=$this->database->connection()->prepare('SELECT b.*,p.code AS programme_code,p.name AS programme_name,p.duration_semesters,(SELECT COUNT(*) FROM students s WHERE s.batch_id=b.id) AS student_count,(SELECT COUNT(*) FROM exam_cycle_batches ecb WHERE ecb.batch_id=b.id) AS cycle_count FROM batches b JOIN programmes p ON p.id=b.programme_id WHERE '.implode(' AND ',$where).' ORDER BY b.start_year DESC,p.code');$q->execute($params);
+        return ['batches'=>$q->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'programmeId'=>$programmeId,'statusFilter'=>$status,'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+    }
+
     private function studentData(Request $request): array
     {
         $search = trim((string) $request->input('search', ''));
         $programmeId = (int) $request->input('programme_id', 0) ?: null;
+        $batchId = (int) $request->input('batch_id', 0) ?: null;
         $page = max(1, (int) $request->input('page', 1));
         $repository = new StudentRepository($this->database->connection());
-        $result = $repository->paginate($search, $programmeId, $page);
+        $result = $repository->paginate($search, $programmeId, $batchId, $page);
         $programmes = $this->programmeOptions();
-        return compact('result', 'search', 'programmeId', 'programmes');
+        $batches=$this->batchOptions();
+        return compact('result', 'search', 'programmeId', 'batchId', 'programmes','batches');
     }
 
     private function studentFormData(?int $id = null): array
     {
         $student = $id ? (new StudentRepository($this->database->connection()))->find($id) : null;
         if ($id && !$student) throw new \RuntimeException('Student record not found.');
-        return ['student' => $student, 'programmes' => $this->programmeOptions(),
+        return ['student' => $student, 'programmes' => $this->programmeOptions(),'batches'=>$this->batchOptions(),
             'old' => $this->session->pullFlash('old', []), 'errors' => $this->session->pullFlash('errors', [])];
     }
 
@@ -328,7 +341,10 @@ final class Application
             return Response::redirect($id ? url("students/{$id}/edit") : url('students/create'));
         }
 
-        $payload = array_merge($input, $parsed, ['batch_id' => null]);
+        $programmeId=(int)($parsed['programme_id']??0);$batchId=(int)$request->input('batch_id',0)?:null;
+        if($batchId){$q=$this->database->connection()->prepare('SELECT COUNT(*) FROM batches WHERE id=:id AND programme_id=:programme');$q->execute(['id'=>$batchId,'programme'=>$programmeId]);if(!(int)$q->fetchColumn()){$this->session->flash('errors',['batch_id'=>'The selected batch does not belong to this programme.']);$this->session->flash('old',array_merge($input,['programme_id'=>$programmeId,'batch_id'=>$batchId]));return Response::redirect($id?url("students/{$id}/edit"):url('students/create'));}}
+        if(!$batchId&&$programmeId)$batchId=$this->findOrCreateStudentBatch($programmeId,(string)($parsed['registration_prefix']??''));
+        $payload = array_merge($input, $parsed, ['batch_id' => $batchId]);
         unset($payload['message']);
         $pdo = $this->database->connection();
         try {
@@ -355,8 +371,16 @@ final class Application
 
     private function programmeOptions(): array
     {
-        return $this->database->connection()->query("SELECT id,code,name,lateral_entry,legacy FROM programmes
+        return $this->database->connection()->query("SELECT id,school_id,code,name,lateral_entry,legacy,duration_semesters FROM programmes
             WHERE status IN ('active','unverified') ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function batchOptions(): array
+    {return $this->database->connection()->query("SELECT b.*,p.code AS programme_code,p.name AS programme_name,p.school_id FROM batches b JOIN programmes p ON p.id=b.programme_id WHERE b.status<>'inactive' ORDER BY b.start_year DESC,p.code")->fetchAll(PDO::FETCH_ASSOC);}
+
+    private function findOrCreateStudentBatch(int $programmeId,string $prefix): ?int
+    {
+        if(!preg_match('/^(\d{2})/',$prefix,$match))return null;$start=2000+(int)$match[1];$pdo=$this->database->connection();$q=$pdo->prepare('SELECT code,duration_semesters FROM programmes WHERE id=:id');$q->execute(['id'=>$programmeId]);$programme=$q->fetch(PDO::FETCH_ASSOC);if(!$programme)return null;$end=$start+max(1,(int)ceil((int)$programme['duration_semesters']/2));$label=$programme['code'].' '.$start.'-'.$end;$pdo->prepare("INSERT INTO batches(programme_id,label,start_year,end_year,status) VALUES(:programme,:label,:start,:end,'active') ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year)")->execute(['programme'=>$programmeId,'label'=>$label,'start'=>$start,'end'=>$end]);$q=$pdo->prepare('SELECT id FROM batches WHERE programme_id=:programme AND label=:label');$q->execute(['programme'=>$programmeId,'label'=>$label]);return (int)$q->fetchColumn()?:null;
     }
 
     private function stageStudentImport(Request $request): Response
@@ -555,10 +579,14 @@ final class Application
             (SELECT COUNT(*) FROM examinations e WHERE e.cycle_id=ec.id AND e.status<>'cancelled') AS paper_count,
             (SELECT COUNT(*) FROM exam_shifts es WHERE es.cycle_id=ec.id) AS shift_count,
             (SELECT COUNT(*) FROM seating_allocations sa WHERE sa.cycle_id=ec.id) AS allocation_count,
-            (SELECT COUNT(*) FROM exam_eligibility ee JOIN examinations e2 ON e2.id=ee.examination_id WHERE e2.cycle_id=ec.id AND ee.eligibility_status='eligible') AS eligible_count
+            (SELECT COUNT(*) FROM exam_eligibility ee JOIN examinations e2 ON e2.id=ee.examination_id WHERE e2.cycle_id=ec.id AND ee.eligibility_status='eligible') AS eligible_count,
+            (SELECT GROUP_CONCAT(b.label ORDER BY b.start_year,p.code SEPARATOR ', ') FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=ec.id) AS batch_labels
             FROM exam_cycles ec ORDER BY ec.start_date DESC")->fetchAll(PDO::FETCH_ASSOC),
             'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
+
+    private function examCycleFormData(): array
+    {return ['batches'=>$this->batchOptions()];}
 
     private function deleteExamCycle(Request $request,int $id,string $method,string $action): Response
     {
@@ -591,26 +619,27 @@ final class Application
         $type=(string)$request->input('exam_type');$duration=(int)$request->input('duration',str_contains($type,'mid')?90:180);
         $data=['name'=>trim((string)$request->input('name')),'academic_year'=>trim((string)$request->input('academic_year')),'exam_type'=>$type,
             'start_date'=>(string)$request->input('start_date'),'end_date'=>(string)$request->input('end_date'),'duration'=>$duration,
+            'batch_ids'=>array_values(array_unique(array_filter(array_map('intval',$_POST['batch_ids']??[])))),
             'shifts'=>[['name'=>(string)$request->input('shift1_name','1st Shift'),'start'=>(string)$request->input('shift1_start'),'end'=>(string)$request->input('shift1_end'),'duration'=>$duration],
                 ['name'=>(string)$request->input('shift2_name','2nd Shift'),'start'=>(string)$request->input('shift2_start'),'end'=>(string)$request->input('shift2_end'),'duration'=>$duration]]];
-        $invalid=$data['name']===''||$data['academic_year']===''||$data['start_date']===''||$data['end_date']===''||$data['start_date']>$data['end_date']||$duration<30||$duration>300;
+        $invalid=$data['name']===''||$data['academic_year']===''||$data['start_date']===''||$data['end_date']===''||$data['start_date']>$data['end_date']||$duration<30||$duration>300||!$data['batch_ids'];
         foreach($data['shifts'] as $shift)if(trim($shift['name'])===''||$shift['start']===''||$shift['end']===''||$shift['start']>=$shift['end'])$invalid=true;
-        if($invalid){$this->session->flash('error','Review the cycle details, date range, duration, and shift times.');$this->session->flash('cycle_old',$_POST);return Response::redirect(url('exam-cycles/create'));}
+        if($invalid){$this->session->flash('error','Review the cycle details, select at least one student batch, and confirm the shift times.');$this->session->flash('cycle_old',$_POST);return Response::redirect(url('exam-cycles/create'));}
         try{$id=(new ExamService($this->database->connection()))->createCycle($data,(int)$this->auth->user()['id']);$this->session->flash('success','Examination cycle created with calendar and shifts.');return Response::redirect(url("date-sheets/{$id}"));}
         catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url('exam-cycles/create'));}
     }
 
     private function courseData(): array
     {
-        $pdo=$this->database->connection();return ['courses'=>$pdo->query("SELECT c.*,pc.id AS mapping_id,pc.semester,pc.category,pc.course_credits,pc.course_level,pc.course_year,pc.mid_sem_duration_minutes,pc.end_sem_duration_minutes,pc.subject_priority,p.id AS programme_id,p.code AS programme_code,p.name AS programme_name,d.name AS department_name,s.short_name AS school_name FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN departments d ON d.id=p.department_id JOIN schools s ON s.id=p.school_id ORDER BY p.code,pc.semester,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $pdo=$this->database->connection();return ['courses'=>$pdo->query("SELECT c.*,pc.id AS mapping_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.course_credits,pc.course_level,pc.course_year,pc.mid_sem_duration_minutes,pc.end_sem_duration_minutes,pc.subject_priority,p.id AS programme_id,p.code AS programme_code,p.name AS programme_name,b.label AS batch_label,d.name AS department_name,s.short_name AS school_name FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id LEFT JOIN departments d ON d.id=p.department_id JOIN schools s ON s.id=p.school_id ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'batches'=>$this->batchOptions(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveCourse(Request $request): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('courses'));
-        $code=strtoupper(trim((string)$request->input('code')));$name=trim((string)$request->input('name'));$programmeId=(int)$request->input('programme_id');$semester=(int)$request->input('semester');$category=(string)$request->input('category','core');$priority=(int)$request->input('subject_priority',50);$credits=(float)$request->input('course_credits',0);$level=strtoupper((string)$request->input('course_level','UG'));$year=(int)$request->input('course_year',max(1,(int)ceil($semester/2)));$midMinutes=(int)round((float)$request->input('mid_sem_hours',1.5)*60);$endMinutes=(int)round((float)$request->input('end_sem_hours',3)*60);
-        if($code===''||$name===''||$programmeId<1||$semester<1||$semester>12||$priority<1||$priority>100||$credits<0||$credits>99.9||!in_array($level,['UG','PG'],true)||$year<1||$year>6||$midMinutes<30||$midMinutes>360||$endMinutes<30||$endMinutes>480){$this->session->flash('error','Review the course identity, credits, level, year, semester, exam hours, and scheduling priority.');return Response::redirect(url('courses'));}
-        $pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare('SELECT id FROM courses WHERE code=:code');$q->execute(['code'=>$code]);$courseId=(int)$q->fetchColumn();if(!$courseId){$pdo->prepare("INSERT INTO courses(code,name,status) VALUES(:code,:name,'active')")->execute(['code'=>$code,'name'=>$name]);$courseId=(int)$pdo->lastInsertId();}else{$pdo->prepare('UPDATE courses SET name=:name WHERE id=:id')->execute(['name'=>$name,'id'=>$courseId]);}$pdo->prepare('INSERT INTO programme_courses(programme_id,course_id,semester,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority) VALUES(:programme,:course,:semester,:category,:credits,:level,:year,:mid,:end,:priority) ON DUPLICATE KEY UPDATE category=VALUES(category),course_credits=VALUES(course_credits),course_level=VALUES(course_level),course_year=VALUES(course_year),mid_sem_duration_minutes=VALUES(mid_sem_duration_minutes),end_sem_duration_minutes=VALUES(end_sem_duration_minutes),subject_priority=VALUES(subject_priority)')->execute(['programme'=>$programmeId,'course'=>$courseId,'semester'=>$semester,'category'=>$category,'credits'=>$credits,'level'=>$level,'year'=>$year,'mid'=>$midMinutes,'end'=>$endMinutes,'priority'=>$priority]);$pdo->commit();$this->session->flash('success','Course structure saved for the selected programme and semester.');}
+        $code=strtoupper(trim((string)$request->input('code')));$name=trim((string)$request->input('name'));$programmeId=(int)$request->input('programme_id');$batchId=(int)$request->input('batch_id');$semester=(int)$request->input('semester');$section=strtoupper(trim((string)$request->input('section','ALL')))?:'ALL';$category=(string)$request->input('category','core');$priority=(int)$request->input('subject_priority',50);$credits=(float)$request->input('course_credits',0);$level=strtoupper((string)$request->input('course_level','UG'));$year=(int)$request->input('course_year',max(1,(int)ceil($semester/2)));$midMinutes=(int)round((float)$request->input('mid_sem_hours',1.5)*60);$endMinutes=(int)round((float)$request->input('end_sem_hours',3)*60);
+        if($code===''||$name===''||$programmeId<1||$batchId<1||$semester<1||$semester>12||!preg_match('/^[A-Z0-9-]{1,20}$/',$section)||$priority<1||$priority>100||$credits<0||$credits>99.9||!in_array($level,['UG','PG'],true)||$year<1||$year>6||$midMinutes<30||$midMinutes>360||$endMinutes<30||$endMinutes>480){$this->session->flash('error','Review the batch, section, course identity, credits, level, year, semester, exam hours, and scheduling priority.');return Response::redirect(url('courses'));}
+        $pdo=$this->database->connection();$check=$pdo->prepare('SELECT COUNT(*) FROM batches WHERE id=:batch AND programme_id=:programme');$check->execute(['batch'=>$batchId,'programme'=>$programmeId]);if(!(int)$check->fetchColumn()){$this->session->flash('error','The selected batch does not belong to this programme.');return Response::redirect(url('courses'));}try{$pdo->beginTransaction();$q=$pdo->prepare('SELECT id FROM courses WHERE code=:code');$q->execute(['code'=>$code]);$courseId=(int)$q->fetchColumn();if(!$courseId){$pdo->prepare("INSERT INTO courses(code,name,status) VALUES(:code,:name,'active')")->execute(['code'=>$code,'name'=>$name]);$courseId=(int)$pdo->lastInsertId();}else{$pdo->prepare('UPDATE courses SET name=:name WHERE id=:id')->execute(['name'=>$name,'id'=>$courseId]);}$pdo->prepare('INSERT INTO programme_courses(programme_id,batch_id,course_id,semester,section,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority) VALUES(:programme,:batch,:course,:semester,:section,:category,:credits,:level,:year,:mid,:end,:priority) ON DUPLICATE KEY UPDATE category=VALUES(category),course_credits=VALUES(course_credits),course_level=VALUES(course_level),course_year=VALUES(course_year),mid_sem_duration_minutes=VALUES(mid_sem_duration_minutes),end_sem_duration_minutes=VALUES(end_sem_duration_minutes),subject_priority=VALUES(subject_priority)')->execute(['programme'=>$programmeId,'batch'=>$batchId,'course'=>$courseId,'semester'=>$semester,'section'=>$section,'category'=>$category,'credits'=>$credits,'level'=>$level,'year'=>$year,'mid'=>$midMinutes,'end'=>$endMinutes,'priority'=>$priority]);$pdo->commit();$this->session->flash('success','Batch- and section-wise course structure saved.');}
         catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url('courses'));
     }
 
@@ -629,7 +658,7 @@ final class Application
         return Response::redirect(url('courses'));
     }
 
-    private function courseImportTemplate(): Response {return Response::csv("Course Code,Course Name,Programme Code,Course Credits,Course Level,Course Year,Semester,Category,Mid Sem Hours,End Sem Hours,Status,Subject Priority\r\nCS-101,Programming Fundamentals,UCS,4,UG,1,1,core,1.5,3,active,10\r\nCS-102,Discrete Mathematics,UCS,4,UG,1,1,core,1.5,3,active,20\r\n",'gbu-course-structure-template.csv');}
+    private function courseImportTemplate(): Response {return Response::csv("Course Code,Course Name,Programme Code,Batch,Section,Course Credits,Course Level,Course Year,Semester,Category,Mid Sem Hours,End Sem Hours,Status,Subject Priority\r\nCS-101,Programming Fundamentals,UCS,UCS 2023-2027,ALL,4,UG,1,1,core,1.5,3,active,10\r\nCS-102,Discrete Mathematics,UCS,UCS 2023-2027,A,4,UG,1,1,core,1.5,3,active,20\r\n",'gbu-course-structure-template.csv');}
 
     private function examCalendarData(int $cycleId): array
     {
@@ -689,14 +718,16 @@ final class Application
     {
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Cycle not found.');
         $q=$pdo->prepare('SELECT * FROM exam_shifts WHERE cycle_id=:id ORDER BY sequence_no');$q->execute(['id'=>$cycleId]);$shifts=$q->fetchAll(PDO::FETCH_ASSOC);$q=$pdo->prepare('SELECT exam_date FROM exam_calendar_dates WHERE cycle_id=:id AND is_exam_day=1 ORDER BY exam_date');$q->execute(['id'=>$cycleId]);
-        return ['cycle'=>$cycle,'shifts'=>$shifts,'dates'=>$q->fetchAll(PDO::FETCH_COLUMN),'courses'=>$pdo->query("SELECT c.id,c.code,c.name,pc.programme_id,pc.semester FROM programme_courses pc JOIN courses c ON c.id=pc.course_id WHERE c.status='active' ORDER BY pc.programme_id,pc.semester,c.code")->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'error'=>$this->session->pullFlash('error')];
+        $b=$pdo->prepare('SELECT b.*,p.code AS programme_code,p.name AS programme_name FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=:cycle ORDER BY p.code,b.start_year');$b->execute(['cycle'=>$cycleId]);$batches=$b->fetchAll(PDO::FETCH_ASSOC);$programmeIds=array_values(array_unique(array_map('intval',array_column($batches,'programme_id'))));$programmes=array_values(array_filter($this->programmeOptions(),static fn(array $p):bool=>!$programmeIds||in_array((int)$p['id'],$programmeIds,true)));
+        $courseQuery=$pdo->prepare("SELECT c.id,c.code,c.name,pc.programme_id,pc.batch_id,pc.semester,pc.section,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE c.status='active' AND (pc.batch_id IN (SELECT batch_id FROM exam_cycle_batches WHERE cycle_id=:cycle) OR pc.batch_id IS NULL) ORDER BY pc.programme_id,b.start_year,pc.semester,pc.section,c.code");$courseQuery->execute(['cycle'=>$cycleId]);
+        return ['cycle'=>$cycle,'shifts'=>$shifts,'dates'=>$q->fetchAll(PDO::FETCH_COLUMN),'courses'=>$courseQuery->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$programmes,'batches'=>$batches,'error'=>$this->session->pullFlash('error')];
     }
 
     private function schedulePaper(Request $request,int $cycleId): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}"));
         $data=['cycle_id'=>$cycleId,'shift_id'=>(int)$request->input('shift_id'),'course_id'=>(int)$request->input('course_id'),'exam_date'=>(string)$request->input('exam_date'),
-            'category'=>(string)$request->input('category','regular'),'programme_id'=>(int)$request->input('programme_id'),'semester'=>(int)$request->input('semester'),'display_label'=>trim((string)$request->input('display_label'))?:null];
+            'category'=>(string)$request->input('category','regular'),'programme_id'=>(int)$request->input('programme_id'),'semester'=>(int)$request->input('semester'),'section'=>strtoupper(trim((string)$request->input('section','ALL')))?:'ALL','batch_label'=>trim((string)$request->input('batch_label')),'display_label'=>trim((string)$request->input('display_label'))?:null];
         try{(new ExamService($this->database->connection()))->schedule($data);$this->session->flash('success','Paper scheduled and eligible students calculated.');return Response::redirect(url("date-sheets/{$cycleId}"));}
         catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url("date-sheets/{$cycleId}/schedule"));}
     }
@@ -705,22 +736,23 @@ final class Application
     {
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
         $schools=$pdo->query("SELECT id,code,name,short_name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-        $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);
-        $curriculum=$pdo->query("SELECT pc.id,pc.programme_id,pc.semester,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id WHERE c.status='active' AND p.status='active' ORDER BY p.code,pc.semester,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC);
+        $cycleBatchQuery=$pdo->prepare("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year,b.label");$cycleBatchQuery->execute(['cycle'=>$cycleId]);$cycleBatches=$cycleBatchQuery->fetchAll(PDO::FETCH_ASSOC);$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatches,'programme_id'))));
+        $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);if($cycleProgrammeIds)$programmes=array_values(array_filter($programmes,static fn(array $p):bool=>in_array((int)$p['id'],$cycleProgrammeIds,true)));
+        $curriculumQuery=$pdo->prepare("SELECT pc.id,pc.programme_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE c.status='active' AND p.status='active' AND (pc.batch_id IN (SELECT batch_id FROM exam_cycle_batches WHERE cycle_id=:cycle) OR pc.batch_id IS NULL) ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code");$curriculumQuery->execute(['cycle'=>$cycleId]);$curriculum=$curriculumQuery->fetchAll(PDO::FETCH_ASSOC);
         $curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
         $last=$this->session->pullFlash('validation_result');
         $selection=$this->session->get('automatic_scope_'.$cycleId,[]);
         $runQuery=$pdo->prepare("SELECT id,school_id,rule_snapshot FROM scheduling_runs WHERE cycle_id=:cycle AND status IN ('ready','generated','approved','published','failed') ORDER BY id DESC LIMIT 1");$runQuery->execute(['cycle'=>$cycleId]);$savedRun=$runQuery->fetch(PDO::FETCH_ASSOC);
         if($savedRun){
             $snapshot=json_decode((string)$savedRun['rule_snapshot'],true)?:[];
-            $itemQuery=$pdo->prepare("SELECT DISTINCT pc.id AS programme_course_id,cohort.programme_id,cohort.semester FROM examinations e JOIN examination_cohorts cohort ON cohort.examination_id=e.id JOIN programmes p ON p.id=cohort.programme_id JOIN programme_courses pc ON pc.programme_id=cohort.programme_id AND pc.course_id=e.course_id AND pc.semester=cohort.semester WHERE e.cycle_id=:cycle AND p.school_id=:school AND e.status<>'cancelled'");$itemQuery->execute(['cycle'=>$cycleId,'school'=>$savedRun['school_id']]);$savedItems=$itemQuery->fetchAll(PDO::FETCH_ASSOC);
+            $itemQuery=$pdo->prepare("SELECT DISTINCT pc.id AS programme_course_id,cohort.programme_id,cohort.semester FROM examinations e JOIN examination_cohorts cohort ON cohort.examination_id=e.id JOIN programmes p ON p.id=cohort.programme_id JOIN programme_courses pc ON pc.programme_id=cohort.programme_id AND pc.course_id=e.course_id AND pc.semester=cohort.semester AND pc.section=cohort.section AND (pc.batch_id=cohort.batch_id OR (pc.batch_id IS NULL AND NOT EXISTS(SELECT 1 FROM programme_courses exact_pc WHERE exact_pc.programme_id=cohort.programme_id AND exact_pc.batch_id=cohort.batch_id AND exact_pc.course_id=e.course_id AND exact_pc.semester=cohort.semester AND exact_pc.section=cohort.section))) WHERE e.cycle_id=:cycle AND p.school_id=:school AND e.status<>'cancelled'");$itemQuery->execute(['cycle'=>$cycleId,'school'=>$savedRun['school_id']]);$savedItems=$itemQuery->fetchAll(PDO::FETCH_ASSOC);
             $savedProgrammeIds=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'programme_id'):($snapshot['programme_ids']??[]))));
             $savedSemesters=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'semester'):($snapshot['semesters']??[]))));
             $savedCourseIds=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'programme_course_id'):($snapshot['programme_course_ids']??[]))));
             $selection=['cycle_id'=>$cycleId,'school_id'=>(int)$savedRun['school_id'],'programme_ids'=>$savedProgrammeIds,'semesters'=>$savedSemesters,'programme_course_ids'=>$savedCourseIds,'subject_selection_active'=>1,'minimum_gap_days'=>(int)($snapshot['minimum_gap_days']??1),'maximum_papers_per_day'=>(int)($snapshot['maximum_papers_per_day']??1),'avoid_consecutive_days'=>!empty($snapshot['avoid_consecutive_days'])?1:null,'use_subject_priority'=>!empty($snapshot['use_subject_priority'])?1:null,'restored_run_id'=>(int)$savedRun['id']];
             $this->session->put('automatic_scope_'.$cycleId,$selection);
         }
-        return compact('cycle','schools','programmes','curriculum','selection')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
+        return compact('cycle','schools','programmes','curriculum','selection','cycleBatches')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
     }
 
     private function validateAutomaticSchedule(Request $request,int $cycleId): Response
@@ -935,11 +967,11 @@ final class Application
 
     private function studentCsv(): Response
     {
-        $rows=$this->database->connection()->query("SELECT s.roll_no_original,s.enrollment_number,s.academic_session,s.normalized_roll_no,s.name,s.branch,s.mobile_number,s.address,s.department_name,s.school_name,s.current_year_of_study,p.code AS programme,s.semester,s.section,s.special_status,s.parsing_status,s.status FROM students s LEFT JOIN programmes p ON p.id=s.programme_id ORDER BY s.normalized_roll_no")->fetchAll(PDO::FETCH_ASSOC);$stream=fopen('php://temp','w+');fputcsv($stream,['Enrollment/Roll Number','Enrollment Number','Academic Session','Normalized Roll Number','Full Name','Branch','Mobile Number','Address','Department','School','Current Year of Study','Programme','Current Semester','Section','Special Status','Parsing Status','Status']);foreach($rows as $row)fputcsv($stream,$row);rewind($stream);$content=stream_get_contents($stream);fclose($stream);return Response::csv("\xEF\xBB\xBF".$content,'gbu-students-'.date('Y-m-d').'.csv');
+        $rows=$this->database->connection()->query("SELECT s.roll_no_original,s.enrollment_number,s.academic_session,s.normalized_roll_no,s.name,s.branch,s.mobile_number,s.address,s.department_name,s.school_name,s.current_year_of_study,p.code AS programme,b.label AS batch,s.semester,s.section,s.special_status,s.parsing_status,s.status FROM students s LEFT JOIN programmes p ON p.id=s.programme_id LEFT JOIN batches b ON b.id=s.batch_id ORDER BY b.start_year,p.code,s.normalized_roll_no")->fetchAll(PDO::FETCH_ASSOC);$stream=fopen('php://temp','w+');fputcsv($stream,['Enrollment/Roll Number','Enrollment Number','Academic Session','Normalized Roll Number','Full Name','Branch','Mobile Number','Address','Department','School','Current Year of Study','Programme','Batch','Current Semester','Section','Special Status','Parsing Status','Status']);foreach($rows as $row)fputcsv($stream,$row);rewind($stream);$content=stream_get_contents($stream);fclose($stream);return Response::csv("\xEF\xBB\xBF".$content,'gbu-students-'.date('Y-m-d').'.csv');
     }
 
     private function attendanceCsv():Response
-    {return $this->csvResponse("SELECT ec.name AS cycle,a.allocation_id,sa.exam_date,es.name AS shift,r.code AS room,rs.seat_label,s.roll_no_original,s.name,p.code AS programme,c.code AS course,a.status,a.remarks FROM attendance a JOIN seating_allocations sa ON sa.id=a.allocation_id JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id JOIN rooms r ON r.id=a.room_id JOIN students s ON s.id=a.student_id JOIN programmes p ON p.id=s.programme_id JOIN seating_assignments x ON x.allocation_id=a.allocation_id AND x.student_id=a.student_id JOIN room_seats rs ON rs.id=x.seat_id JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id ORDER BY sa.exam_date,es.sequence_no,r.code,rs.sequence_no",'gbu-attendance');}
+    {return $this->csvResponse("SELECT ec.name AS cycle,a.allocation_id,sa.exam_date,es.name AS shift,r.code AS room,rs.seat_label,s.roll_no_original,s.name,p.code AS programme,b.label AS batch,c.code AS course,a.status,a.remarks FROM attendance a JOIN seating_allocations sa ON sa.id=a.allocation_id JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id JOIN rooms r ON r.id=a.room_id JOIN students s ON s.id=a.student_id JOIN programmes p ON p.id=s.programme_id LEFT JOIN batches b ON b.id=s.batch_id JOIN seating_assignments x ON x.allocation_id=a.allocation_id AND x.student_id=a.student_id JOIN room_seats rs ON rs.id=x.seat_id JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id ORDER BY sa.exam_date,es.sequence_no,b.start_year,p.code,r.code,rs.sequence_no",'gbu-attendance');}
     private function invigilationCsv():Response
     {return $this->csvResponse("SELECT ec.name AS cycle,ia.exam_date,es.name AS shift,r.code AS room,f.employee_id,f.name AS faculty,f.designation,ia.duty_status FROM invigilation_allocations ia JOIN exam_cycles ec ON ec.id=ia.cycle_id JOIN exam_shifts es ON es.id=ia.shift_id JOIN rooms r ON r.id=ia.room_id JOIN faculty f ON f.id=ia.faculty_id ORDER BY ia.exam_date,es.sequence_no,r.code",'gbu-invigilation');}
     private function unallocatedCsv():Response
@@ -961,6 +993,22 @@ final class Application
         $data=['school_id'=>(int)$request->input('school_id'),'code'=>strtoupper(trim((string)$request->input('code'))),'name'=>trim((string)$request->input('name')),'level'=>(string)$request->input('level','undergraduate'),'duration_semesters'=>(int)$request->input('duration_semesters')?:null,'lateral_entry'=>$request->input('lateral_entry')?1:0,'legacy'=>$request->input('legacy')?1:0,'status'=>'active'];
         if(!$data['school_id']||$data['code']===''||$data['name']===''){$this->session->flash('error','School, programme code, and programme name are required.');return Response::redirect(url('masters/programmes'));}
         try{$pdo=$this->database->connection();$keys=array_keys($data);$pdo->prepare('INSERT INTO programmes('.implode(',',$keys).') VALUES('.implode(',',array_map(fn($k)=>":{$k}",$keys)).')')->execute($data);$this->audit($pdo,'programme.created','programme',(int)$pdo->lastInsertId(),$data);$this->session->flash('success','Programme mapping created.');}catch(\Throwable){$this->session->flash('error','Programme code must be unique.');}return Response::redirect(url('masters/programmes'));
+    }
+
+    private function saveProgrammeDuration(Request $request,int $id): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('masters/programmes'));
+        $semesters=(int)$request->input('duration_semesters');if($semesters<1||$semesters>20){$this->session->flash('error','Programme duration must be between 1 and 20 semesters.');return Response::redirect(url('masters/programmes'));}
+        $pdo=$this->database->connection();$pdo->prepare('UPDATE programmes SET duration_semesters=:duration WHERE id=:id')->execute(['duration'=>$semesters,'id'=>$id]);$this->audit($pdo,'programme.duration_updated','programme',$id,['duration_semesters'=>$semesters]);$this->session->flash('success','Programme duration updated. Future batch end years will use the new duration.');return Response::redirect(url('masters/programmes'));
+    }
+
+    private function saveBatch(Request $request): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('masters/batches'));
+        $programmeId=(int)$request->input('programme_id');$start=(int)$request->input('start_year');$status=(string)$request->input('status','active');$pdo=$this->database->connection();$q=$pdo->prepare('SELECT code,duration_semesters FROM programmes WHERE id=:id');$q->execute(['id'=>$programmeId]);$programme=$q->fetch(PDO::FETCH_ASSOC);
+        if(!$programme||$start<2000||$start>2100||!in_array($status,['active','completed','inactive'],true)){$this->session->flash('error','Select a programme, a valid admission year, and batch status.');return Response::redirect(url('masters/batches'));}
+        $end=$start+max(1,(int)ceil((int)$programme['duration_semesters']/2));$label=$programme['code'].' '.$start.'-'.$end;
+        try{$pdo->prepare('INSERT INTO batches(programme_id,label,start_year,end_year,status) VALUES(:programme,:label,:start,:end,:status) ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year),status=VALUES(status)')->execute(['programme'=>$programmeId,'label'=>$label,'start'=>$start,'end'=>$end,'status'=>$status]);$q=$pdo->prepare('SELECT id FROM batches WHERE programme_id=:programme AND label=:label');$q->execute(['programme'=>$programmeId,'label'=>$label]);$id=(int)$q->fetchColumn();$this->audit($pdo,'batch.saved','batch',$id,compact('programmeId','label','start','end','status'));$this->session->flash('success',"Batch {$label} saved.");}catch(\Throwable $e){$this->session->flash('error','The batch could not be saved. '.$e->getMessage());}return Response::redirect(url('masters/batches'));
     }
 
     private function facultyAvailabilityData(): array

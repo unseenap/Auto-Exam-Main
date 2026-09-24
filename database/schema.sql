@@ -82,8 +82,10 @@ CREATE TABLE courses (
 CREATE TABLE programme_courses (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   programme_id BIGINT UNSIGNED NOT NULL,
+  batch_id BIGINT UNSIGNED NULL,
   course_id BIGINT UNSIGNED NOT NULL,
   semester TINYINT UNSIGNED NULL,
+  section VARCHAR(20) NOT NULL DEFAULT 'ALL',
   category ENUM('core','elective','bridge','common','back_paper','other') NOT NULL DEFAULT 'core',
   course_credits DECIMAL(4,1) NOT NULL DEFAULT 0.0,
   course_level ENUM('UG','PG') NOT NULL DEFAULT 'UG',
@@ -92,8 +94,10 @@ CREATE TABLE programme_courses (
   end_sem_duration_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 180,
   subject_priority SMALLINT UNSIGNED NOT NULL DEFAULT 50,
   KEY idx_programme_courses_priority (programme_id, semester, subject_priority),
-  UNIQUE KEY uq_programme_course_semester (programme_id, course_id, semester),
+  KEY idx_programme_courses_batch (batch_id, semester),
+  UNIQUE KEY uq_programme_batch_course_semester_section (programme_id, batch_id, course_id, semester, section),
   CONSTRAINT fk_programme_courses_programme FOREIGN KEY (programme_id) REFERENCES programmes(id),
+  CONSTRAINT fk_programme_courses_batch FOREIGN KEY (batch_id) REFERENCES batches(id),
   CONSTRAINT fk_programme_courses_course FOREIGN KEY (course_id) REFERENCES courses(id)
 ) ENGINE=InnoDB;
 
@@ -198,6 +202,16 @@ CREATE TABLE exam_cycles (
   CONSTRAINT fk_exam_cycles_user FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE exam_cycle_batches (
+  cycle_id BIGINT UNSIGNED NOT NULL,
+  batch_id BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (cycle_id, batch_id),
+  KEY idx_cycle_batches_batch (batch_id),
+  CONSTRAINT fk_cycle_batches_cycle FOREIGN KEY (cycle_id) REFERENCES exam_cycles(id) ON DELETE CASCADE,
+  CONSTRAINT fk_cycle_batches_batch FOREIGN KEY (batch_id) REFERENCES batches(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE exam_shifts (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   cycle_id BIGINT UNSIGNED NOT NULL,
@@ -288,8 +302,9 @@ CREATE TABLE examination_cohorts (
   programme_id BIGINT UNSIGNED NOT NULL,
   batch_id BIGINT UNSIGNED NULL,
   semester TINYINT UNSIGNED NULL,
+  section VARCHAR(20) NOT NULL DEFAULT 'ALL',
   display_label VARCHAR(255) NULL,
-  UNIQUE KEY uq_exam_cohort (examination_id, programme_id, batch_id, semester),
+  UNIQUE KEY uq_exam_cohort (examination_id, programme_id, batch_id, semester, section),
   CONSTRAINT fk_exam_cohorts_exam FOREIGN KEY (examination_id) REFERENCES examinations(id) ON DELETE CASCADE,
   CONSTRAINT fk_exam_cohorts_programme FOREIGN KEY (programme_id) REFERENCES programmes(id),
   CONSTRAINT fk_exam_cohorts_batch FOREIGN KEY (batch_id) REFERENCES batches(id)

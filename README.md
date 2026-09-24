@@ -46,12 +46,12 @@ The system is designed for Gautam Buddha University and follows its school, prog
 | Module | Implemented capabilities |
 |---|---|
 | Dashboard | Operational statistics, quick actions and role-aware navigation |
-| Academic masters | Schools, departments, programmes, batches and programme codes |
+| Academic masters | Schools, departments, programmes, duration in semesters, admission-session batches and programme codes |
 | Course structure | Course name, code, credits, UG/PG level, academic year, semester, mid/end-semester duration, category and scheduling priority by programme |
 | Students | Individual records, large CSV/XLSX import, validation preview and programme detection |
 | Faculty | Faculty master, bulk import, school association and availability |
 | Rooms | Bulk room import, row/column geometry, visual layout, priority and disabled seats |
-| Examination cycles | Academic session, examination type, calendar dates, shifts and lifecycle status |
+| Examination cycles | Academic session, required student-batch selection, examination type, calendar dates, shifts and lifecycle status |
 | Date sheets | Manual/import scheduling, school-wise automatic generation, branch and subject selection, holidays, flexible gaps, priorities, live validation, locking, moving, regeneration, approval, publication and CSV export |
 | Seating | Versioned generation, room capacity use, seat allocation and unallocated-student reporting |
 | Attendance | Room-wise attendance sheets, marking and correction support |
@@ -105,16 +105,17 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[Configure schools and programmes] --> B[Add curriculum by programme and semester]
-    B --> C[Import students and faculty]
-    C --> D[Create rooms and visual seat layouts]
-    D --> E[Create examination cycle, dates and shifts]
-    E --> F[Generate, review and publish school-wise date sheet]
-    F --> G[Generate and review room-wise seating plan]
-    G --> H[Publish room and attendance sheets]
-    H --> I[Allocate invigilation duties]
-    I --> J[Record attendance and replacements]
-    J --> K[Export reports and review audit history]
+    A[Configure schools, programmes and durations] --> B[Create admission batches]
+    B --> C[Add curriculum by batch, semester and section]
+    C --> D[Import students and faculty]
+    D --> E[Create rooms and visual seat layouts]
+    E --> F[Select batches and create examination cycle]
+    F --> G[Generate, review and publish school-wise date sheet]
+    G --> H[Generate and review room-wise seating plan]
+    H --> I[Publish room and attendance sheets]
+    I --> J[Allocate invigilation duties]
+    J --> K[Record attendance and replacements]
+    K --> L[Export reports and review audit history]
 ```
 
 ## Data-flow diagrams
@@ -296,7 +297,7 @@ Current Year of Study, Current Semester, Section
 
 ### Curriculum
 
-Courses are associated with a programme and semester using a subject code, name and category. The included B.Tech CSE dataset provides **87 unique courses and 94 curriculum mappings** across eight semesters.
+Courses are associated with an exact programme batch, semester and section using a subject code, name and category. Use section `ALL` for subjects taken by the complete batch, or values such as `A` and `B` for section-specific papers. Automatic scheduling reads only the curriculum for batches assigned to the examination cycle and creates separate cohort rows for each batch/semester/section. The included B.Tech CSE dataset provides **87 unique courses and 94 curriculum mappings** across eight semesters.
 
 ### Rooms and disabled seats
 
@@ -312,7 +313,7 @@ Each room defines rows, columns and either `row_major` or `column_major` allocat
 
 ## Database design
 
-The current schema contains **34 tables** grouped into these domains:
+The current schema contains **35 tables** grouped into these domains:
 
 | Domain | Principal tables |
 |---|---|
@@ -320,7 +321,7 @@ The current schema contains **34 tables** grouped into these domains:
 | Academic masters | `schools`, `departments`, `programmes`, `batches`, `courses`, `programme_courses` |
 | People | `students`, `faculty`, `faculty_availability` |
 | Physical infrastructure | `rooms`, `room_seats` |
-| Examination planning | `exam_cycles`, `exam_shifts`, `exam_calendar_dates`, `examinations`, `examination_cohorts`, `exam_eligibility`, `scheduling_rules`, `scheduling_runs`, `scheduling_run_items`, `scheduling_conflicts` |
+| Examination planning | `exam_cycles`, `exam_cycle_batches`, `exam_shifts`, `exam_calendar_dates`, `examinations`, `examination_cohorts`, `exam_eligibility`, `scheduling_rules`, `scheduling_runs`, `scheduling_run_items`, `scheduling_conflicts` |
 | Seating | `seating_allocations`, `seating_assignments`, `seating_unallocated` |
 | Operations | `invigilation_allocations`, `attendance`, `replacement_requests` |
 | Imports | `import_batches`, `import_rows`, `import_errors` |

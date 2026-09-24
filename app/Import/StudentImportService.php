@@ -22,7 +22,7 @@ final class StudentImportService
             if (!in_array($required, $headers, true)) throw new RuntimeException("Missing required column: {$required}.");
         }
         $programmes = [];
-        foreach ($this->pdo->query("SELECT id,code,lateral_entry,legacy FROM programmes WHERE status IN ('active','unverified')") as $programme) {
+        foreach ($this->pdo->query("SELECT id,code,lateral_entry,legacy,duration_semesters FROM programmes WHERE status IN ('active','unverified')") as $programme) {
             $programmes[$programme['code']] = $programme;
         }
         $storedName = basename($path);
@@ -78,6 +78,7 @@ final class StudentImportService
         $count = 0;
         foreach ($rows as $row) {
             $data = json_decode($row['normalized_data'], true, flags: JSON_THROW_ON_ERROR);
+            if(!empty($data['programme_id'])&&empty($data['batch_id']))$data['batch_id']=$this->resolveBatch((int)$data['programme_id'],(string)($data['registration_prefix']??''));
             $insert->execute($data);
             $entityId = (int) $this->pdo->lastInsertId();
             $this->pdo->prepare('UPDATE import_rows SET committed_entity_id=:entity WHERE id=:id')->execute(['entity' => $entityId, 'id' => $row['id']]);
@@ -87,6 +88,11 @@ final class StudentImportService
         $this->pdo->prepare("INSERT INTO audit_logs(user_id,action,entity_type,entity_id,new_values) VALUES(:user,'student_import.committed','import_batch',:id,:data)")
             ->execute(['user' => $userId, 'id' => $batchId, 'data' => json_encode(['students_created' => $count])]);
         return ['created' => $count];
+    }
+
+    private function resolveBatch(int $programmeId,string $prefix): ?int
+    {
+        if(!preg_match('/^(\d{2})/',$prefix,$match))return null;$start=2000+(int)$match[1];$q=$this->pdo->prepare('SELECT code,duration_semesters FROM programmes WHERE id=:id');$q->execute(['id'=>$programmeId]);$programme=$q->fetch(PDO::FETCH_ASSOC);if(!$programme)return null;$end=$start+max(1,(int)ceil((int)$programme['duration_semesters']/2));$label=$programme['code'].' '.$start.'-'.$end;$this->pdo->prepare("INSERT INTO batches(programme_id,label,start_year,end_year,status) VALUES(:programme,:label,:start,:end,'active') ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year)")->execute(['programme'=>$programmeId,'label'=>$label,'start'=>$start,'end'=>$end]);$q=$this->pdo->prepare('SELECT id FROM batches WHERE programme_id=:programme AND label=:label');$q->execute(['programme'=>$programmeId,'label'=>$label]);return (int)$q->fetchColumn()?:null;
     }
 
     private function headerKey(string $header): string

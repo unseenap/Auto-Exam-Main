@@ -64,6 +64,11 @@ ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALU
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'PSE','M.Tech Software Engineering','postgraduate',4,0,0,'active' FROM schools WHERE code='ICT'
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 
+INSERT INTO batches(programme_id,label,start_year,end_year,status)
+SELECT id,CONCAT(code,' 2023-',2023+CEIL(duration_semesters/2)),2023,2023+CEIL(duration_semesters/2),'active'
+FROM programmes WHERE status='active' AND duration_semesters IS NOT NULL
+ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year),status=VALUES(status);
+
 INSERT INTO courses (code,name,status) VALUES
 ('CA522','Computer Vision Applications','active'),
 ('CA526','Cognitive Computing','active'),
@@ -643,9 +648,9 @@ INSERT INTO seed_programme_courses (programme_code,course_code,semester,category
 ('UCS','CS494','8','core','0.0','UG','4','90','180','50'),
 ('UCS','GP','8','common','0.0','UG','4','90','180','50');
 
-INSERT INTO programme_courses (programme_id,course_id,semester,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority)
-SELECT p.id,c.id,s.semester,s.category,s.course_credits,s.course_level,s.course_year,s.mid_sem_duration_minutes,s.end_sem_duration_minutes,s.subject_priority
-FROM seed_programme_courses s JOIN programmes p ON p.code=s.programme_code JOIN courses c ON c.code=s.course_code
+INSERT INTO programme_courses (programme_id,batch_id,course_id,semester,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority)
+SELECT p.id,b.id,c.id,s.semester,s.category,s.course_credits,s.course_level,s.course_year,s.mid_sem_duration_minutes,s.end_sem_duration_minutes,s.subject_priority
+FROM seed_programme_courses s JOIN programmes p ON p.code=s.programme_code JOIN batches b ON b.programme_id=p.id AND b.start_year=2023 JOIN courses c ON c.code=s.course_code
 ON DUPLICATE KEY UPDATE category=VALUES(category),course_credits=VALUES(course_credits),course_level=VALUES(course_level),course_year=VALUES(course_year),mid_sem_duration_minutes=VALUES(mid_sem_duration_minutes),end_sem_duration_minutes=VALUES(end_sem_duration_minutes),subject_priority=VALUES(subject_priority);
 
 DROP TABLE seed_programme_courses;

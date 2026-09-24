@@ -10,7 +10,7 @@ final class StudentRepository
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function paginate(string $search = '', ?int $programmeId = null, int $page = 1, int $perPage = 25): array
+    public function paginate(string $search = '', ?int $programmeId = null, ?int $batchId = null, int $page = 1, int $perPage = 25): array
     {
         $where = ['1=1']; $params = [];
         if ($search !== '') {
@@ -18,6 +18,7 @@ final class StudentRepository
             $params['search'] = '%' . $search . '%';
         }
         if ($programmeId) { $where[] = 's.programme_id=:programme_id'; $params['programme_id'] = $programmeId; }
+        if ($batchId) { $where[] = 's.batch_id=:batch_id'; $params['batch_id'] = $batchId; }
         $clause = implode(' AND ', $where);
         $count = $this->pdo->prepare("SELECT COUNT(*) FROM students s WHERE {$clause}");
         $count->execute($params); $total = (int) $count->fetchColumn();

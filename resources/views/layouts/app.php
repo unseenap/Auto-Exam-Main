@@ -54,6 +54,7 @@
       <?php if($can('academic.manage')):?>
       <a aria-label="Schools" data-nav-short="SC" class="<?= str_ends_with($path, '/masters/schools') ? 'active' : '' ?>" href="<?= e(url('masters/schools')) ?>">Schools</a>
       <a aria-label="Programmes" data-nav-short="PR" class="<?= str_ends_with($path, '/masters/programmes') ? 'active' : '' ?>" href="<?= e(url('masters/programmes')) ?>">Programmes</a>
+      <a aria-label="Batches" data-nav-short="BA" class="<?= str_ends_with($path, '/masters/batches') ? 'active' : '' ?>" href="<?= e(url('masters/batches')) ?>">Batches</a>
       <a aria-label="Courses" data-nav-short="CO" class="<?= str_contains($path, '/courses') ? 'active' : '' ?>" href="<?= e(url('courses')) ?>">Courses</a>
       <?php endif;?>
       <?php if($can('students.manage')):?><a aria-label="Students" data-nav-short="ST" class="<?= str_contains($path, '/students') ? 'active' : '' ?>" href="<?= e(url('students')) ?>">Students</a><?php endif;?>
