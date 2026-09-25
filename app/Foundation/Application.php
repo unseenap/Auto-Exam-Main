@@ -114,6 +114,7 @@ final class Application
         if($required!==null&&!$this->auth->can($required))return Response::html(View::render('errors/403'),403);
 
         if ($path === '/students' && $method === 'POST') return $this->saveStudent($request);
+        if ($path === '/students/import/template.csv' && $method === 'GET') return $this->studentImportTemplate();
         if ($path === '/students/import' && $method === 'POST') return $this->stageStudentImport($request);
         if (preg_match('#^/students/import/(\d+)/commit$#', $path, $matches) === 1 && $method === 'POST') {
             return $this->commitStudentImport($request, (int) $matches[1]);
@@ -127,12 +128,14 @@ final class Application
         if (preg_match('#^/students/(\d+)/edit$#', $path, $matches) === 1 && $method === 'GET') {
             return Response::html(View::render('students/form', $this->studentFormData((int) $matches[1])));
         }
+        if (preg_match('#^/students/(\d+)/delete$#', $path, $matches) === 1 && $method === 'POST') return $this->deleteMasterRecord($request,'students',(int)$matches[1],'students','student');
         if ($path === '/faculty' && $method === 'POST') return $this->saveFaculty($request);
         if ($path === '/faculty/import' && $method === 'POST') return $this->stageFacultyImport($request);
         if (preg_match('#^/faculty/import/(\d+)/commit$#', $path, $matches) === 1 && $method === 'POST') return $this->commitFacultyImport($request,(int)$matches[1]);
         if (preg_match('#^/faculty/import/(\d+)$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('faculty/import-preview',$this->facultyImportPreview((int)$matches[1])));
         if (preg_match('#^/faculty/(\d+)$#', $path, $matches) === 1 && $method === 'POST') return $this->saveFaculty($request,(int)$matches[1]);
         if (preg_match('#^/faculty/(\d+)/edit$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('faculty/form',$this->facultyFormData((int)$matches[1])));
+        if (preg_match('#^/faculty/(\d+)/delete$#', $path, $matches) === 1 && $method === 'POST') return $this->deleteMasterRecord($request,'faculty',(int)$matches[1],'faculty','faculty member');
         if ($path === '/rooms' && $method === 'POST') return $this->saveRoom($request);
         if ($path === '/rooms/import/template.csv' && $method === 'GET') return $this->roomImportTemplate();
         if ($path === '/rooms/import' && $method === 'POST') return $this->stageRoomImport($request);
@@ -141,6 +144,7 @@ final class Application
         if (preg_match('#^/rooms/(\d+)$#', $path, $matches) === 1 && $method === 'POST') return $this->saveRoom($request,(int)$matches[1]);
         if (preg_match('#^/rooms/(\d+)/edit$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/form',$this->roomFormData((int)$matches[1])));
         if (preg_match('#^/rooms/(\d+)/layout$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/layout',$this->roomLayoutData((int)$matches[1])));
+        if (preg_match('#^/rooms/(\d+)/delete$#', $path, $matches) === 1 && $method === 'POST') return $this->deleteMasterRecord($request,'rooms',(int)$matches[1],'rooms','room');
         if($path==='/exam-cycles'&&$method==='POST')return $this->saveExamCycle($request);
         if(preg_match('#^/exam-cycles/(\\d+)/delete(?:/(confirm))?$#',$path,$matches)===1&&in_array($method,['GET','POST'],true))return $this->deleteExamCycle($request,(int)$matches[1],$method,$matches[2]??'');
         if($path==='/date-sheets/template.csv'&&$method==='GET')return Response::csv("Exam Date,Shift,Course Code,Course Name,Programme Code,Batch Label,Semester,Section,Category,Display Label,Roll Numbers\r\n2026-05-14,1,MA112,Applied Mathematics-II,UCS,UCS 2023-2027,2,ALL,regular,UCS 2023-2027 Semester 2,\r\n2026-05-14,1,MA112,Applied Mathematics-II,ICS,ICS 2023-2028,2,A,regular,ICS 2023-2028 Semester 2 Section A,\r\n",'gbu-date-sheet-template.csv');
@@ -187,6 +191,8 @@ final class Application
         if($path==='/reports/unallocated.csv'&&$method==='GET')return $this->unallocatedCsv();
         if($path==='/masters/schools'&&$method==='POST')return $this->saveSchool($request);
         if($path==='/masters/programmes'&&$method==='POST')return $this->saveProgramme($request);
+        if(preg_match('#^/masters/schools/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteMasterRecord($request,'schools',(int)$matches[1],'masters/schools','school');
+        if(preg_match('#^/masters/programmes/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteMasterRecord($request,'programmes',(int)$matches[1],'masters/programmes','programme');
         if(preg_match('#^/masters/programmes/(\d+)/duration$#',$path,$matches)===1&&$method==='POST')return $this->saveProgrammeDuration($request,(int)$matches[1]);
         if($path==='/masters/batches'&&$method==='POST')return $this->saveBatch($request);
         if($path==='/faculty/availability'&&$method==='POST')return $this->saveFacultyAvailability($request);
@@ -295,7 +301,7 @@ final class Application
         $result = $repository->paginate($search, $programmeId, $batchId, $page);
         $programmes = $this->programmeOptions();
         $batches=$this->batchOptions();
-        return compact('result', 'search', 'programmeId', 'batchId', 'programmes','batches');
+        return compact('result', 'search', 'programmeId', 'batchId', 'programmes','batches')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function studentFormData(?int $id = null): array
@@ -444,7 +450,7 @@ final class Application
         if($search!==''){$where='(f.name LIKE :search OR f.employee_id LIKE :search)';$params['search']='%'.$search.'%';}
         $statement=$this->database->connection()->prepare("SELECT f.*,s.short_name AS school_name,d.name AS department_name FROM faculty f
             JOIN schools s ON s.id=f.school_id LEFT JOIN departments d ON d.id=f.department_id WHERE {$where} ORDER BY f.name");
-        $statement->execute($params);return ['faculty'=>$statement->fetchAll(PDO::FETCH_ASSOC),'search'=>$search];
+        $statement->execute($params);return ['faculty'=>$statement->fetchAll(PDO::FETCH_ASSOC),'search'=>$search,'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function stageFacultyImport(Request $request): Response
@@ -499,7 +505,7 @@ final class Application
     private function roomData(Request $request): array
     {
         return ['rooms'=>$this->database->connection()->query("SELECT r.*,SUM(CASE WHEN rs.is_blocked=1 THEN 1 ELSE 0 END) AS blocked_seats
-            FROM rooms r LEFT JOIN room_seats rs ON rs.room_id=r.id GROUP BY r.id ORDER BY r.priority,r.code")->fetchAll(PDO::FETCH_ASSOC)];
+            FROM rooms r LEFT JOIN room_seats rs ON rs.room_id=r.id GROUP BY r.id ORDER BY r.priority,r.code")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function roomFormData(?int $id=null): array
@@ -652,13 +658,21 @@ final class Application
         }
         try{
             (new \App\Exams\CourseDeletionService($this->database->connection()))->deleteMapping($id,(int)$this->auth->user()['id']);
-            $this->session->flash('success','Course removed from the selected branch and semester. Other branches and the subject master are unchanged.');
+            $this->session->flash('success','Course removed from the selected batch curriculum. Its subject master was also removed when no other curriculum or examination used it.');
         }catch(\RuntimeException $e){$this->session->flash('error',$e->getMessage());}
         catch(\Throwable $e){$this->session->flash('error','The course could not be removed. It may be referenced by another record.');}
         return Response::redirect(url('courses'));
     }
 
     private function courseImportTemplate(): Response {return Response::csv("Course Code,Course Name,Programme Code,Batch,Section,Course Credits,Course Level,Course Year,Semester,Category,Mid Sem Hours,End Sem Hours,Status,Subject Priority\r\nCS-101,Programming Fundamentals,UCS,UCS 2023-2027,ALL,4,UG,1,1,core,1.5,3,active,10\r\nCS-102,Discrete Mathematics,UCS,UCS 2023-2027,A,4,UG,1,1,core,1.5,3,active,20\r\n",'gbu-course-structure-template.csv');}
+
+    private function studentImportTemplate(): Response
+    {
+        $content="Enrollment/Roll Number,Enrollment Number,Academic Session,Full Name,Branch,Mobile Number,Address,Department,School,Current Year of Study,Current Semester,Section\r\n";
+        $content.="235UCS001,2300100266,2023-2024,Demo Student One,Computer Science and Engineering,9876543210,Greater Noida,Computer Science and Engineering,School of Information and Communication Technology,1,1,A\r\n";
+        $content.="235ICS001,2300100267,2023-2024,Demo Student Two,Integrated B.Tech Computer Science,9876543211,Greater Noida,Computer Science and Engineering,School of Information and Communication Technology,1,1,ALL\r\n";
+        return Response::csv("\xEF\xBB\xBF".$content,'gbu-student-bulk-import-template.csv');
+    }
 
     private function examCalendarData(int $cycleId): array
     {
@@ -745,11 +759,12 @@ final class Application
         $runQuery=$pdo->prepare("SELECT id,school_id,rule_snapshot FROM scheduling_runs WHERE cycle_id=:cycle AND status IN ('ready','generated','approved','published','failed') ORDER BY id DESC LIMIT 1");$runQuery->execute(['cycle'=>$cycleId]);$savedRun=$runQuery->fetch(PDO::FETCH_ASSOC);
         if($savedRun){
             $snapshot=json_decode((string)$savedRun['rule_snapshot'],true)?:[];
-            $itemQuery=$pdo->prepare("SELECT DISTINCT pc.id AS programme_course_id,cohort.programme_id,cohort.semester FROM examinations e JOIN examination_cohorts cohort ON cohort.examination_id=e.id JOIN programmes p ON p.id=cohort.programme_id JOIN programme_courses pc ON pc.programme_id=cohort.programme_id AND pc.course_id=e.course_id AND pc.semester=cohort.semester AND pc.section=cohort.section AND (pc.batch_id=cohort.batch_id OR (pc.batch_id IS NULL AND NOT EXISTS(SELECT 1 FROM programme_courses exact_pc WHERE exact_pc.programme_id=cohort.programme_id AND exact_pc.batch_id=cohort.batch_id AND exact_pc.course_id=e.course_id AND exact_pc.semester=cohort.semester AND exact_pc.section=cohort.section))) WHERE e.cycle_id=:cycle AND p.school_id=:school AND e.status<>'cancelled'");$itemQuery->execute(['cycle'=>$cycleId,'school'=>$savedRun['school_id']]);$savedItems=$itemQuery->fetchAll(PDO::FETCH_ASSOC);
+            $itemQuery=$pdo->prepare("SELECT DISTINCT pc.id AS programme_course_id,cohort.programme_id,cohort.batch_id,cohort.semester FROM examinations e JOIN examination_cohorts cohort ON cohort.examination_id=e.id JOIN programmes p ON p.id=cohort.programme_id JOIN programme_courses pc ON pc.programme_id=cohort.programme_id AND pc.course_id=e.course_id AND pc.semester=cohort.semester AND pc.section=cohort.section AND (pc.batch_id=cohort.batch_id OR (pc.batch_id IS NULL AND NOT EXISTS(SELECT 1 FROM programme_courses exact_pc WHERE exact_pc.programme_id=cohort.programme_id AND exact_pc.batch_id=cohort.batch_id AND exact_pc.course_id=e.course_id AND exact_pc.semester=cohort.semester AND exact_pc.section=cohort.section))) WHERE e.cycle_id=:cycle AND p.school_id=:school AND e.status<>'cancelled'");$itemQuery->execute(['cycle'=>$cycleId,'school'=>$savedRun['school_id']]);$savedItems=$itemQuery->fetchAll(PDO::FETCH_ASSOC);
             $savedProgrammeIds=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'programme_id'):($snapshot['programme_ids']??[]))));
+            $savedBatchIds=array_values(array_unique(array_filter(array_map('intval',$savedItems?array_column($savedItems,'batch_id'):($snapshot['batch_ids']??[])))));
             $savedSemesters=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'semester'):($snapshot['semesters']??[]))));
             $savedCourseIds=array_values(array_unique(array_map('intval',$savedItems?array_column($savedItems,'programme_course_id'):($snapshot['programme_course_ids']??[]))));
-            $selection=['cycle_id'=>$cycleId,'school_id'=>(int)$savedRun['school_id'],'programme_ids'=>$savedProgrammeIds,'semesters'=>$savedSemesters,'programme_course_ids'=>$savedCourseIds,'subject_selection_active'=>1,'minimum_gap_days'=>(int)($snapshot['minimum_gap_days']??1),'maximum_papers_per_day'=>(int)($snapshot['maximum_papers_per_day']??1),'avoid_consecutive_days'=>!empty($snapshot['avoid_consecutive_days'])?1:null,'use_subject_priority'=>!empty($snapshot['use_subject_priority'])?1:null,'restored_run_id'=>(int)$savedRun['id']];
+            $selection=['cycle_id'=>$cycleId,'school_id'=>(int)$savedRun['school_id'],'programme_ids'=>$savedProgrammeIds,'batch_ids'=>$savedBatchIds,'semesters'=>$savedSemesters,'programme_course_ids'=>$savedCourseIds,'subject_selection_active'=>1,'minimum_gap_days'=>(int)($snapshot['minimum_gap_days']??1),'maximum_papers_per_day'=>(int)($snapshot['maximum_papers_per_day']??1),'avoid_consecutive_days'=>!empty($snapshot['avoid_consecutive_days'])?1:null,'use_subject_priority'=>!empty($snapshot['use_subject_priority'])?1:null,'restored_run_id'=>(int)$savedRun['id']];
             $this->session->put('automatic_scope_'.$cycleId,$selection);
         }
         return compact('cycle','schools','programmes','curriculum','selection','cycleBatches')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
@@ -774,7 +789,7 @@ final class Application
 
     private function automaticScope(Request $request,int $cycleId): array
     {
-        return ['cycle_id'=>$cycleId,'school_id'=>(int)$request->input('school_id'),'programme_ids'=>$_POST['programme_ids']??[],'semesters'=>$_POST['semesters']??[],'programme_course_ids'=>$_POST['programme_course_ids']??[],'subject_selection_active'=>$request->input('subject_selection_active'),'minimum_gap_days'=>(int)$request->input('minimum_gap_days',1),'maximum_papers_per_day'=>(int)$request->input('maximum_papers_per_day',1),'avoid_consecutive_days'=>$request->input('avoid_consecutive_days'),'use_subject_priority'=>$request->input('use_subject_priority')];
+        return ['cycle_id'=>$cycleId,'school_id'=>(int)$request->input('school_id'),'programme_ids'=>$_POST['programme_ids']??[],'batch_ids'=>$_POST['batch_ids']??[],'semesters'=>$_POST['semesters']??[],'programme_course_ids'=>$_POST['programme_course_ids']??[],'subject_selection_active'=>$request->input('subject_selection_active'),'minimum_gap_days'=>(int)$request->input('minimum_gap_days',1),'maximum_papers_per_day'=>(int)$request->input('maximum_papers_per_day',1),'avoid_consecutive_days'=>$request->input('avoid_consecutive_days'),'use_subject_priority'=>$request->input('use_subject_priority')];
     }
 
     private function generateAutomaticSchedule(Request $request,int $cycleId): Response
@@ -978,6 +993,22 @@ final class Application
     {return $this->csvResponse("SELECT ec.name AS cycle,sa.exam_date,es.name AS shift,s.roll_no_original,s.name,p.code AS programme,c.code AS course,su.reason,su.resolved_at FROM seating_unallocated su JOIN seating_allocations sa ON sa.id=su.allocation_id JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id JOIN students s ON s.id=su.student_id JOIN programmes p ON p.id=s.programme_id JOIN examinations e ON e.id=su.examination_id JOIN courses c ON c.id=e.course_id ORDER BY sa.exam_date,s.normalized_roll_no",'gbu-unallocated');}
     private function csvResponse(string $sql,string $name):Response
     {$rows=$this->database->connection()->query($sql)->fetchAll(PDO::FETCH_ASSOC);$stream=fopen('php://temp','w+');if($rows)fputcsv($stream,array_map(fn($key)=>ucwords(str_replace('_',' ',$key)),array_keys($rows[0])));foreach($rows as $row)fputcsv($stream,$row);rewind($stream);$content=stream_get_contents($stream);fclose($stream);return Response::csv("\xEF\xBB\xBF".$content,$name.'-'.date('Y-m-d').'.csv');}
+
+    private function deleteMasterRecord(Request $request,string $table,int $id,string $redirect,string $label): Response
+    {
+        $allowed=['schools'=>'school','programmes'=>'programme','students'=>'student','faculty'=>'faculty','rooms'=>'room'];
+        if(!isset($allowed[$table]))throw new \RuntimeException('Unsupported deletion target.');
+        if(!$this->session->validCsrf((string)$request->input('_token'))){$this->session->flash('error','Your session token expired. Reload the page and try again.');return Response::redirect(url($redirect));}
+        $pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare("SELECT * FROM {$table} WHERE id=:id FOR UPDATE");$q->execute(['id'=>$id]);$record=$q->fetch(PDO::FETCH_ASSOC);if(!$record)throw new \RuntimeException(ucfirst($label).' record no longer exists.');
+            if($table==='rooms')$pdo->prepare('DELETE FROM room_seats WHERE room_id=:id')->execute(['id'=>$id]);
+            if($table==='faculty')$pdo->prepare('DELETE FROM faculty_availability WHERE faculty_id=:id')->execute(['id'=>$id]);
+            $pdo->prepare("DELETE FROM {$table} WHERE id=:id")->execute(['id'=>$id]);
+            $pdo->prepare('INSERT INTO audit_logs(user_id,action,entity_type,entity_id,old_values) VALUES(:user,:action,:type,:id,:old)')->execute(['user'=>(int)$this->auth->user()['id'],'action'=>$allowed[$table].'.deleted','type'=>$allowed[$table],'id'=>$id,'old'=>json_encode($record,JSON_THROW_ON_ERROR)]);
+            $pdo->commit();$this->session->flash('success',ucfirst($label).' deleted successfully.');
+        }catch(\PDOException $e){if($pdo->inTransaction())$pdo->rollBack();$message=(string)$e->getCode()==='23000'?'Cannot delete this '.$label.' because it is already used by related academic or examination records. Remove those dependencies first.':'The '.$label.' could not be deleted.';$this->session->flash('error',$message);
+        }catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}
+        return Response::redirect(url($redirect));
+    }
 
     private function saveSchool(Request $request): Response
     {

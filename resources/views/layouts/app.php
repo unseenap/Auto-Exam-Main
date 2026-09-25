@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="<?= e(url('assets/css/legacy-modern.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/legacy-modern.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/navigation-slider.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/navigation-slider.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/rbac.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/rbac.css'))) ?>">
+  <link rel="stylesheet" href="<?= e(url('assets/css/ui-consistency.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/ui-consistency.css'))) ?>">
 </head>
 <body class="admin-body">
   <a class="skip-link" href="#main-content">Skip to content</a>

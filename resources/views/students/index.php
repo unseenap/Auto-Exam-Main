@@ -1,6 +1,7 @@
-<?php $pageTitle = 'Students'; $success = app()->session()->pullFlash('success'); ?>
+<?php $pageTitle = 'Students'; ?>
 <section class="page-heading"><div><p class="eyebrow">Academic records</p><h1>Student directory</h1><p>Search official roll numbers, confirm programme mappings, and identify records requiring manual review.</p></div><div class="heading-actions"><a class="secondary-button" href="<?= e(url('students/import')) ?>">Import file</a><a class="primary-button" href="<?= e(url('students/create')) ?>">Add student</a></div></section>
 <?php if ($success): ?><div class="alert success" role="status"><?= e($success) ?></div><?php endif; ?>
+<?php if ($error): ?><div class="alert error" role="alert"><?= e($error) ?></div><?php endif; ?>
 <section class="panel table-panel">
   <form class="filter-bar" method="get" action="<?= e(url('students')) ?>">
     <label>Search<input name="search" type="search" value="<?= e($search) ?>" placeholder="Roll number or student name"></label>
@@ -19,7 +20,7 @@
     <td>Year <?= (int)$student['current_year_of_study'] ?><small class="cell-note">Semester <?= (int)$student['semester'] ?></small></td><td><?= e($student['mobile_number']?:'-') ?></td>
     <td><span class="status-label <?= e($student['parsing_status']) ?>"><?= e(ucfirst($student['parsing_status'])) ?></span></td>
     <td><span class="status-label <?= e($student['status']) ?>"><?= e(ucfirst($student['status'])) ?></span></td>
-    <td><a class="row-action" href="<?= e(url('students/' . $student['id'] . '/edit')) ?>">Edit</a></td>
+    <td><div class="record-actions"><a class="row-action" href="<?= e(url('students/' . $student['id'] . '/edit')) ?>">Edit</a><form method="post" action="<?= e(url('students/'.$student['id'].'/delete')) ?>" onsubmit="return confirm('Delete student <?= e($student['roll_no_original']) ?>? This cannot be undone and will be blocked if examination records use the student.')"><?= csrf_field() ?><button class="delete-action" type="submit"><i class="ti ti-trash" aria-hidden="true"></i> Delete</button></form></div></td>
   </tr><?php endforeach; ?></tbody></table></div>
   <nav class="pagination" aria-label="Student pages">
     <?php if ($result['page'] > 1): ?><a href="?<?= e(http_build_query(['search'=>$search,'programme_id'=>$programmeId,'batch_id'=>$batchId,'page'=>$result['page']-1])) ?>">Previous</a><?php endif; ?>

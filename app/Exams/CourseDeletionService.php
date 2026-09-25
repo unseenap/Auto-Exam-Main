@@ -11,7 +11,7 @@ final class CourseDeletionService
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    /** Remove only the selected curriculum mapping, never other branches' subjects. */
+    /** Remove the selected curriculum mapping and clean up an unused subject master. */
     public function deleteMapping(int $mappingId, int $userId): void
     {
         $this->pdo->beginTransaction();
@@ -27,7 +27,16 @@ final class CourseDeletionService
             if((int)$q->fetchColumn())throw new RuntimeException('Cannot delete: this branch and semester already have examination records for the subject.');
             $this->pdo->prepare('DELETE FROM programme_courses WHERE id=?')->execute([$mappingId]);
             $this->pdo->prepare("INSERT INTO audit_logs(user_id,action,entity_type,entity_id,old_values) VALUES(?,'course.curriculum_deleted','programme_course',?,?)")->execute([$userId,$mappingId,json_encode($mapping,JSON_THROW_ON_ERROR)]);
-            // Keep the subject master: imports, other branches and historic records may use it.
+            $q=$this->pdo->prepare('SELECT COUNT(*) FROM programme_courses WHERE course_id=?');
+            $q->execute([$mapping['course_id']]);
+            $remainingMappings=(int)$q->fetchColumn();
+            $q=$this->pdo->prepare('SELECT COUNT(*) FROM examinations WHERE course_id=?');
+            $q->execute([$mapping['course_id']]);
+            $historicExams=(int)$q->fetchColumn();
+            if($remainingMappings===0&&$historicExams===0){
+                $this->pdo->prepare('DELETE FROM courses WHERE id=?')->execute([$mapping['course_id']]);
+                $this->pdo->prepare("INSERT INTO audit_logs(user_id,action,entity_type,entity_id,old_values) VALUES(?,'course.deleted','course',?,?)")->execute([$userId,$mapping['course_id'],json_encode(['code'=>$mapping['code']],JSON_THROW_ON_ERROR)]);
+            }
             $this->pdo->commit();
         } catch (\Throwable $e) {
             if($this->pdo->inTransaction())$this->pdo->rollBack();

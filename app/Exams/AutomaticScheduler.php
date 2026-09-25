@@ -21,7 +21,10 @@ final class AutomaticScheduler
         if($run['cycle_status']!=='draft')throw new RuntimeException('Automatic generation is allowed only while the examination cycle is in draft status.');
         $rules=json_decode($run['rule_snapshot'],true,flags:JSON_THROW_ON_ERROR);$programmeIds=array_map('intval',$rules['programme_ids']??[]);$semesters=array_map('intval',$rules['semesters']??[]);
         if(!$programmeIds||!$semesters)throw new RuntimeException('The validated scheduling scope is empty.');
-        $cycleBatches=$this->query("SELECT b.id,b.programme_id,b.label FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year",['cycle'=>$run['cycle_id']]);$batchesByProgramme=[];foreach($cycleBatches as $batch)$batchesByProgramme[(int)$batch['programme_id']][]=$batch;
+        $cycleBatches=$this->query("SELECT b.id,b.programme_id,b.label FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year",['cycle'=>$run['cycle_id']]);
+        $selectedBatchIds=array_values(array_unique(array_filter(array_map('intval',$rules['batch_ids']??[]))));
+        if($selectedBatchIds)$cycleBatches=array_values(array_filter($cycleBatches,static fn(array $batch):bool=>in_array((int)$batch['id'],$selectedBatchIds,true)));
+        $batchesByProgramme=[];foreach($cycleBatches as $batch)$batchesByProgramme[(int)$batch['programme_id']][]=$batch;
         $programmeMarks=implode(',',array_fill(0,count($programmeIds),'?'));$semesterMarks=implode(',',array_fill(0,count($semesters),'?'));
         $summary=json_decode($run['validation_summary']??'{}',true)?:[];
         if(!empty($summary['regenerated_from'])){
