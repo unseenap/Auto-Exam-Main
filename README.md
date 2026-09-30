@@ -5,7 +5,7 @@
 
   **A role-governed university platform for curriculum management, automatic date-sheet generation, room-aware seating, attendance, invigilation, replacements, audit and reporting.**
 
-  `PHP 8.2+` · `MariaDB / MySQL` · `Responsive & Accessible UI` · `CSV/XLSX Imports` · `Deterministic Scheduling` · `Print-ready Reports`
+  `PHP 8.2+` · `MariaDB / MySQL` · `Responsive & Accessible UI` · `CSV/XLSX Imports` · `Deterministic Scheduling` · `Branded Excel & Print Reports`
 </div>
 
 ---
@@ -28,6 +28,7 @@ The system is designed for Gautam Buddha University and follows its school, prog
 ## Contents
 
 - [System capabilities](#system-capabilities)
+- [Latest updates](#latest-updates)
 - [Automatic date-sheet scheduling](#automatic-date-sheet-scheduling)
 - [Operational workflow](#operational-workflow)
 - [Data-flow diagrams](#data-flow-diagrams)
@@ -46,19 +47,32 @@ The system is designed for Gautam Buddha University and follows its school, prog
 | Module | Implemented capabilities |
 |---|---|
 | Dashboard | Operational statistics, quick actions and role-aware navigation |
-| Academic masters | Schools, departments, programmes, duration in semesters, admission-session batches and programme codes |
-| Course structure | Course name, code, credits, UG/PG level, academic year, semester, mid/end-semester duration, category and scheduling priority by programme |
+| Academic masters | Schools, departments, programmes, duration in semesters, admission-session batches, programme codes and validated programme CSV/XLSX import |
+| Course structure | Batch-specific course name, code, credits, UG/PG level, academic year, semester, section, mid/end-semester duration, category, scheduling priority, active status and dependent programme/batch/semester filters |
 | Students | Individual records, large CSV/XLSX import, validation preview and programme detection |
 | Faculty | Faculty master, bulk import, school association and availability |
 | Rooms | Bulk room import, row/column geometry, visual layout, priority and disabled seats |
 | Examination cycles | Academic session, required student-batch selection, examination type, calendar dates, shifts and lifecycle status |
-| Date sheets | Manual/import scheduling, school-wise automatic generation, branch and subject selection, holidays, flexible gaps, priorities, live validation, locking, moving, regeneration, approval, publication and CSV export |
+| Date sheets | Manual/import scheduling, school-wise automatic generation, batch-derived current semesters, branch/batch/subject selection, holidays, flexible gaps, priorities, live validation, locking, moving, regeneration, approval, publication and branded XLSX/detailed CSV export |
 | Seating | Versioned generation, room capacity use, seat allocation and unallocated-student reporting |
 | Attendance | Room-wise attendance sheets, marking and correction support |
 | Invigilation | Faculty duty allocation, session conflict control and workload tracking |
 | Replacements | Replacement requests, approval status and replacement history |
 | Reports | Seating, attendance, date-sheet and operational CSV/print outputs |
 | Governance | Eight application roles, CSRF protection, session control and audit logs |
+
+## Latest updates
+
+The current revision adds the following operational and UI improvements:
+
+- **Automatic batch progression:** regular, mid-semester and end-semester cycles derive each selected batch's current semester from its admission years, programme duration, academic session and cycle date. Completed or not-yet-started batches are blocked from regular scheduling.
+- **Batch-safe scheduling:** validation and generation retain a batch-to-semester snapshot so subjects from historical or future semesters cannot leak into a regular date sheet.
+- **Programme bulk import:** administrators can download a CSV template, validate CSV/XLSX programme files, review valid and invalid rows, and commit only accepted records.
+- **Improved curriculum import:** shortened batch-year aliases such as `UCS 2019-23` resolve to their canonical batch label, imported course status is retained, and preview screens show the normalized status.
+- **Course register controls:** programme, batch and semester filters are dependent; course status can be changed from the register without recreating the curriculum mapping.
+- **Selection-safe scheduling UI:** filtering branches, batches and semesters no longer resets deliberate subject selections.
+- **Official Excel output:** published date sheets and generated scheduling runs can be exported as formatted `.xlsx` workbooks with the university identity, frozen headings, print layout and programme/batch/semester matrix.
+- **Navigation refinement:** switching the desktop sidebar off now removes it completely, expands the workspace to full width and prevents hidden links from receiving keyboard focus. Mobile navigation remains an off-canvas drawer.
 
 ## Automatic date-sheet scheduling
 
@@ -69,8 +83,8 @@ The automatic scheduler builds one independent date-sheet line for every selecte
 1. Create an examination cycle with its date range, examination type, paper duration and shifts.
 2. Mark Sundays, university holidays and any unavailable dates in **Calendar & holidays**.
 3. Open **Automatic scheduling** and select one school.
-4. Select only the programmes belonging to that school, followed by the required semesters.
-5. Review the written subjects loaded for each selected branch. Eligible theory papers start selected and may be included or excluded individually.
+4. Select only the programmes and admission batches belonging to that school. For regular, mid-semester and end-semester cycles, the application limits the scope to each active batch's calculated current semester.
+5. Review the written subjects loaded for each selected branch, batch, semester and section. Eligible theory papers start selected and may be included or excluded individually; filter changes preserve those choices.
 6. Set the preferred rest gap, daily paper limit, priority handling and non-consecutive-day preference.
 7. Review live academic, calendar and feasibility checks, then save validation.
 8. Generate the draft, lock important placements, move a paper when needed or regenerate unlocked papers.
@@ -84,6 +98,8 @@ The automatic scheduler builds one independent date-sheet line for every selecte
 - Sundays and configured holidays are unavailable unless explicitly enabled as examination days.
 - Existing papers are preserved and shown during validation so a new branch can be added without silently replacing another branch's schedule.
 - Locked papers keep their placement during regeneration; unlocked papers may be recalculated.
+- Regular, mid-semester and end-semester cycles schedule only the semester appropriate to each active batch. Back-paper and special cycles may select historical semesters explicitly.
+- Completed or not-yet-started batches are rejected from regular-cycle generation instead of silently producing incorrect papers.
 - Student records are not required to build a draft date sheet. Eligibility counts remain zero until matching active students exist.
 - Reopening Automatic Scheduling for an existing draft reconstructs the scope from the current database records. Its school, scheduled branches, semesters and written papers are selected automatically, including papers preserved from earlier runs.
 
@@ -212,7 +228,7 @@ flowchart LR
     A[Apache / OpenResty]
     F[public/index.php<br/>Front controller]
     APP[Application routing<br/>Authentication and policies]
-    S[Domain services<br/>Import · Exams · Rooms · Seating]
+    S[Domain services<br/>Academic · Import · Exams · Export · Rooms · Seating]
     V[PHP views<br/>Responsive university UI]
     M[(MariaDB / MySQL)]
     FS[(Temporary uploads<br/>Exports and logs)]
@@ -232,9 +248,10 @@ flowchart LR
 ```text
 Auto-Exam-Main/
 ├── app/
-│   ├── Academic/       Roll-number and student-domain logic
+│   ├── Academic/       Roll-number, student-domain and batch-progression logic
 │   ├── Auth/           Authentication and role policies
 │   ├── Exams/          Examination scheduling services
+│   ├── Export/         Dependency-free formatted XLSX generation
 │   ├── Foundation/     Application, database, session and environment
 │   ├── Import/         CSV/XLSX staging, validation and commit services
 │   ├── Rooms/          Physical seat generation
@@ -297,7 +314,9 @@ Current Year of Study, Current Semester, Section
 
 ### Curriculum
 
-Courses are associated with an exact programme batch, semester and section using a subject code, name and category. Use section `ALL` for subjects taken by the complete batch, or values such as `A` and `B` for section-specific papers. Automatic scheduling reads only the curriculum for batches assigned to the examination cycle and creates separate cohort rows for each batch/semester/section. The included B.Tech CSE dataset provides **87 unique courses and 94 curriculum mappings** across eight semesters.
+Courses are associated with an exact programme batch, semester and section using a subject code, name and category. Use section `ALL` for subjects taken by the complete batch, or values such as `A` and `B` for section-specific papers. Automatic scheduling reads only the curriculum for batches assigned to the examination cycle and creates separate cohort rows for each batch/semester/section. The canonical seed currently provides **212 unique courses**, including **127 UCS curriculum mappings** across eight semesters; the standalone B.Tech CSE import fixture contains 94 valid curriculum rows and one intentionally rejected blank row.
+
+Regular-cycle semester progression is derived from the cycle's academic session and date. Odd-session examinations select the odd semester for the batch's study year and even-session examinations select the even semester. Programme duration defines when a batch is complete.
 
 ### Rooms and disabled seats
 
@@ -309,6 +328,8 @@ Each room defines rows, columns and either `row_major` or `column_major` allocat
 - Maximum application-level size: 10 MB.
 - Imports are staged and validated before commit.
 - Invalid rows remain visible with row-specific messages.
+- Programme imports require School Code, Programme Code, Programme Name, Level and Duration Semesters; optional status, lateral-entry and legacy flags are supported.
+- Curriculum imports accept canonical batch labels and shortened ending-year aliases when they resolve unambiguously.
 - InfinityFree deployments can process the PHP temporary upload when persistent file writes are unavailable.
 
 ## Database design
@@ -326,7 +347,7 @@ The current schema contains **35 tables** grouped into these domains:
 | Operations | `invigilation_allocations`, `attendance`, `replacement_requests` |
 | Imports | `import_batches`, `import_rows`, `import_errors` |
 
-The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean installation: import the schema first and the seed second. The schema already contains the complete automatic-scheduling structure, including priorities, rules, runs, run items and conflicts.
+The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean local installation: import the schema first and import the seed second. The schema creates and selects `gbu_exam_operations`, then defines all 35 tables, indexes and foreign keys for scheduling, staged `programmes` imports and active/inactive curriculum status. The InfinityFree package builder automatically removes the local database-selection block when generating provider-compatible SQL files.
 
 ## Local installation
 
@@ -398,6 +419,7 @@ CSV demonstration datasets remain available under `storage/demo-data`, including
 
 Use the application import screens for operational data:
 
+- **Programmes** — owning school, three-letter programme code, programme name, level, duration, flags and status.
 - **Students** — identifiers, session, programme, school, semester, section and contact information.
 - **Faculty** — faculty identity, school association and availability data.
 - **Courses** — programme/branch, subject code and name, credits, UG/PG level, course year, semester, category, examination duration and priority.
@@ -410,6 +432,9 @@ Run parser and role-policy tests:
 ```powershell
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\RollNumberParserTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\RolePolicyTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\BatchProgressionTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\WrittenPaperPolicyTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\XlsxExporterTest.php
 ```
 
 Run database-backed verification while MariaDB is available:
@@ -417,10 +442,16 @@ Run database-backed verification while MariaDB is available:
 ```powershell
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\SeedTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\CourseImportTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\CourseBatchLabelAliasTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\ProgrammeImportTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\RoomImportTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\BTechCseCurriculumDatasetTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\EndToEndTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\AutomaticSchedulingTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\PreferredGapSchedulingTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\SoictSchedulingTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\CourseDeletionTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\ExamCycleDeletionTest.php
 ```
 
 Database-backed tests create isolated temporary databases and remove them after completion.
@@ -440,7 +471,7 @@ Before production use, change temporary credentials, keep `APP_DEBUG=false`, use
 
 ## Reporting and printing
 
-Print actions use the browser print dialog; choose **Save as PDF** for official PDF output. CSV exports are UTF-8 compatible and can be opened in spreadsheet applications. Always review the university header, examination cycle, date, shift, room and publication status before distribution.
+Print actions use the browser print dialog; choose **Save as PDF** for official PDF output. Date sheets also provide a formatted Excel workbook, while detailed operational exports remain UTF-8-compatible CSV files. Always review the university header, school, examination cycle, programme/batch/semester labels, dates, shifts, rooms and publication status before distribution.
 
 ---
 

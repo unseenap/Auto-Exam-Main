@@ -8,11 +8,14 @@ use App\Auth\Auth;
 use App\Auth\RolePolicy;
 use App\Academic\RollNumberParser;
 use App\Academic\StudentRepository;
+use App\Academic\BatchProgression;
 use App\Import\StudentImportService;
 use App\Import\FacultyImportService;
 use App\Import\DateSheetImportService;
 use App\Import\RoomImportService;
 use App\Import\CourseImportService;
+use App\Import\ProgrammeImportService;
+use App\Export\XlsxExporter;
 use App\Rooms\RoomSeatGenerator;
 use App\Exams\ExamService;
 use App\Exams\SchedulingValidator;
@@ -151,6 +154,7 @@ final class Application
         if(preg_match('#^/exam-cycles/(\d+)/calendar$#',$path,$matches)===1&&$method==='POST')return $this->saveExamCalendar($request,(int)$matches[1]);
         if(preg_match('#^/exam-cycles/(\d+)/calendar$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/calendar',$this->examCalendarData((int)$matches[1])));
         if($path==='/courses'&&$method==='POST')return $this->saveCourse($request);
+        if(preg_match('#^/courses/(\d+)/status$#',$path,$matches)===1&&$method==='POST')return $this->updateCourseStatus($request,(int)$matches[1]);
         if(preg_match('#^/courses/curriculum/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteCourseMapping($request,(int)$matches[1]);
         if($path==='/courses/import/template.csv'&&$method==='GET')return $this->courseImportTemplate();
         if($path==='/courses/import'&&$method==='POST')return $this->stageCourseImport($request);
@@ -166,6 +170,7 @@ final class Application
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/approve$#',$path,$matches)===1&&$method==='POST')return $this->approveAutomaticSchedule($request,(int)$matches[1],(int)$matches[2]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/publish$#',$path,$matches)===1&&$method==='POST')return $this->publishAutomaticSchedule($request,(int)$matches[1],(int)$matches[2]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/export.csv$#',$path,$matches)===1&&$method==='GET')return $this->automaticRunCsv((int)$matches[1],(int)$matches[2]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/export.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->automaticRunXlsx((int)$matches[1],(int)$matches[2]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/compare$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/automatic-compare',$this->automaticCompareData((int)$matches[1],(int)$matches[2])));
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/automatic-review',$this->automaticRunData((int)$matches[1],(int)$matches[2])));
         if(preg_match('#^/date-sheets/(\d+)/automatic$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/automatic',$this->automaticScheduleData((int)$matches[1])));
@@ -174,6 +179,7 @@ final class Application
         if(preg_match('#^/date-sheets/(\d+)/import/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/import-preview',$this->dateSheetImportPreview((int)$matches[1],(int)$matches[2])));
         if(preg_match('#^/date-sheets/(\d+)/import$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/import',['cycleId'=>(int)$matches[1],'error'=>$this->session->pullFlash('error')]));
         if(preg_match('#^/date-sheets/(\d+)/schedule$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/schedule',$this->scheduleData((int)$matches[1])));
+        if(preg_match('#^/date-sheets/(\d+)/export.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->dateSheetXlsx((int)$matches[1]);
         if(preg_match('#^/date-sheets/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/date-sheet',$this->dateSheetData((int)$matches[1])));
         if($path==='/seating/generate'&&$method==='POST')return $this->generateSeating($request);
         if(preg_match('#^/seating/(\d+)/publish$#',$path,$matches)===1&&$method==='POST')return $this->publishSeating($request,(int)$matches[1]);
@@ -191,6 +197,10 @@ final class Application
         if($path==='/reports/unallocated.csv'&&$method==='GET')return $this->unallocatedCsv();
         if($path==='/masters/schools'&&$method==='POST')return $this->saveSchool($request);
         if($path==='/masters/programmes'&&$method==='POST')return $this->saveProgramme($request);
+        if($path==='/masters/programmes/import/template.csv'&&$method==='GET')return $this->programmeImportTemplate();
+        if($path==='/masters/programmes/import'&&$method==='POST')return $this->stageProgrammeImport($request);
+        if(preg_match('#^/masters/programmes/import/(\d+)/commit$#',$path,$matches)===1&&$method==='POST')return $this->commitProgrammeImport($request,(int)$matches[1]);
+        if(preg_match('#^/masters/programmes/import/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('masters/programme-import-preview',$this->programmeImportPreview((int)$matches[1])));
         if(preg_match('#^/masters/schools/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteMasterRecord($request,'schools',(int)$matches[1],'masters/schools','school');
         if(preg_match('#^/masters/programmes/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteMasterRecord($request,'programmes',(int)$matches[1],'masters/programmes','programme');
         if(preg_match('#^/masters/programmes/(\d+)/duration$#',$path,$matches)===1&&$method==='POST')return $this->saveProgrammeDuration($request,(int)$matches[1]);
@@ -203,6 +213,7 @@ final class Application
             '/dashboard' => Response::html(View::render('dashboard', $this->dashboardData())),
             '/masters/schools' => Response::html(View::render('masters/schools', $this->schoolData())),
             '/masters/programmes' => Response::html(View::render('masters/programmes', $this->programmeData())),
+            '/masters/programmes/import' => Response::html(View::render('masters/programme-import',['error'=>$this->session->pullFlash('error')])),
             '/masters/batches' => Response::html(View::render('masters/batches', $this->batchData($request))),
             '/students' => Response::html(View::render('students/index', $this->studentData($request))),
             '/students/create' => Response::html(View::render('students/form', $this->studentFormData())),
@@ -643,10 +654,20 @@ final class Application
     private function saveCourse(Request $request): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('courses'));
-        $code=strtoupper(trim((string)$request->input('code')));$name=trim((string)$request->input('name'));$programmeId=(int)$request->input('programme_id');$batchId=(int)$request->input('batch_id');$semester=(int)$request->input('semester');$section=strtoupper(trim((string)$request->input('section','ALL')))?:'ALL';$category=(string)$request->input('category','core');$priority=(int)$request->input('subject_priority',50);$credits=(float)$request->input('course_credits',0);$level=strtoupper((string)$request->input('course_level','UG'));$year=(int)$request->input('course_year',max(1,(int)ceil($semester/2)));$midMinutes=(int)round((float)$request->input('mid_sem_hours',1.5)*60);$endMinutes=(int)round((float)$request->input('end_sem_hours',3)*60);
-        if($code===''||$name===''||$programmeId<1||$batchId<1||$semester<1||$semester>12||!preg_match('/^[A-Z0-9-]{1,20}$/',$section)||$priority<1||$priority>100||$credits<0||$credits>99.9||!in_array($level,['UG','PG'],true)||$year<1||$year>6||$midMinutes<30||$midMinutes>360||$endMinutes<30||$endMinutes>480){$this->session->flash('error','Review the batch, section, course identity, credits, level, year, semester, exam hours, and scheduling priority.');return Response::redirect(url('courses'));}
-        $pdo=$this->database->connection();$check=$pdo->prepare('SELECT COUNT(*) FROM batches WHERE id=:batch AND programme_id=:programme');$check->execute(['batch'=>$batchId,'programme'=>$programmeId]);if(!(int)$check->fetchColumn()){$this->session->flash('error','The selected batch does not belong to this programme.');return Response::redirect(url('courses'));}try{$pdo->beginTransaction();$q=$pdo->prepare('SELECT id FROM courses WHERE code=:code');$q->execute(['code'=>$code]);$courseId=(int)$q->fetchColumn();if(!$courseId){$pdo->prepare("INSERT INTO courses(code,name,status) VALUES(:code,:name,'active')")->execute(['code'=>$code,'name'=>$name]);$courseId=(int)$pdo->lastInsertId();}else{$pdo->prepare('UPDATE courses SET name=:name WHERE id=:id')->execute(['name'=>$name,'id'=>$courseId]);}$pdo->prepare('INSERT INTO programme_courses(programme_id,batch_id,course_id,semester,section,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority) VALUES(:programme,:batch,:course,:semester,:section,:category,:credits,:level,:year,:mid,:end,:priority) ON DUPLICATE KEY UPDATE category=VALUES(category),course_credits=VALUES(course_credits),course_level=VALUES(course_level),course_year=VALUES(course_year),mid_sem_duration_minutes=VALUES(mid_sem_duration_minutes),end_sem_duration_minutes=VALUES(end_sem_duration_minutes),subject_priority=VALUES(subject_priority)')->execute(['programme'=>$programmeId,'batch'=>$batchId,'course'=>$courseId,'semester'=>$semester,'section'=>$section,'category'=>$category,'credits'=>$credits,'level'=>$level,'year'=>$year,'mid'=>$midMinutes,'end'=>$endMinutes,'priority'=>$priority]);$pdo->commit();$this->session->flash('success','Batch- and section-wise course structure saved.');}
+        $code=strtoupper(trim((string)$request->input('code')));$name=trim((string)$request->input('name'));$programmeId=(int)$request->input('programme_id');$batchId=(int)$request->input('batch_id');$semester=(int)$request->input('semester');$section=strtoupper(trim((string)$request->input('section','ALL')))?:'ALL';$category=(string)$request->input('category','core');$status=strtolower(trim((string)$request->input('status','active')));$priority=(int)$request->input('subject_priority',50);$credits=(float)$request->input('course_credits',0);$level=strtoupper((string)$request->input('course_level','UG'));$year=(int)$request->input('course_year',max(1,(int)ceil($semester/2)));$midMinutes=(int)round((float)$request->input('mid_sem_hours',1.5)*60);$endMinutes=(int)round((float)$request->input('end_sem_hours',3)*60);
+        if($code===''||$name===''||$programmeId<1||$batchId<1||$semester<1||$semester>12||!preg_match('/^[A-Z0-9-]{1,20}$/',$section)||!in_array($status,['active','inactive'],true)||$priority<1||$priority>100||$credits<0||$credits>99.9||!in_array($level,['UG','PG'],true)||$year<1||$year>6||$midMinutes<30||$midMinutes>360||$endMinutes<30||$endMinutes>480){$this->session->flash('error','Review the batch, section, course identity, status, credits, level, year, semester, exam hours, and scheduling priority.');return Response::redirect(url('courses'));}
+        $pdo=$this->database->connection();$check=$pdo->prepare('SELECT COUNT(*) FROM batches WHERE id=:batch AND programme_id=:programme');$check->execute(['batch'=>$batchId,'programme'=>$programmeId]);if(!(int)$check->fetchColumn()){$this->session->flash('error','The selected batch does not belong to this programme.');return Response::redirect(url('courses'));}try{$pdo->beginTransaction();$q=$pdo->prepare('SELECT id FROM courses WHERE code=:code');$q->execute(['code'=>$code]);$courseId=(int)$q->fetchColumn();if(!$courseId){$pdo->prepare('INSERT INTO courses(code,name,status) VALUES(:code,:name,:status)')->execute(['code'=>$code,'name'=>$name,'status'=>$status]);$courseId=(int)$pdo->lastInsertId();}else{$pdo->prepare('UPDATE courses SET name=:name,status=:status WHERE id=:id')->execute(['name'=>$name,'status'=>$status,'id'=>$courseId]);}$pdo->prepare('INSERT INTO programme_courses(programme_id,batch_id,course_id,semester,section,category,course_credits,course_level,course_year,mid_sem_duration_minutes,end_sem_duration_minutes,subject_priority) VALUES(:programme,:batch,:course,:semester,:section,:category,:credits,:level,:year,:mid,:end,:priority) ON DUPLICATE KEY UPDATE category=VALUES(category),course_credits=VALUES(course_credits),course_level=VALUES(course_level),course_year=VALUES(course_year),mid_sem_duration_minutes=VALUES(mid_sem_duration_minutes),end_sem_duration_minutes=VALUES(end_sem_duration_minutes),subject_priority=VALUES(subject_priority)')->execute(['programme'=>$programmeId,'batch'=>$batchId,'course'=>$courseId,'semester'=>$semester,'section'=>$section,'category'=>$category,'credits'=>$credits,'level'=>$level,'year'=>$year,'mid'=>$midMinutes,'end'=>$endMinutes,'priority'=>$priority]);$pdo->commit();$this->session->flash('success','Batch- and section-wise course structure saved.');}
         catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url('courses'));
+    }
+
+    private function updateCourseStatus(Request $request,int $id): Response
+    {
+        $programme=strtoupper(trim((string)$request->input('return_programme','')));$batchId=max(0,(int)$request->input('return_batch_id',0));$semester=max(0,min(12,(int)$request->input('return_semester',0)));$params=[];if(preg_match('/^[A-Z0-9-]{1,20}$/',$programme))$params['programme']=$programme;if($batchId)$params['batch_id']=$batchId;if($semester)$params['semester']=$semester;$returnUrl=url('courses').($params?'?'.http_build_query($params):'');
+        if(!$this->session->validCsrf((string)$request->input('_token'))){$this->session->flash('error','Your session token expired. Reload the page and try again.');return Response::redirect($returnUrl);}
+        $status=strtolower(trim((string)$request->input('status')));if(!in_array($status,['active','inactive'],true)){$this->session->flash('error','Select Active or Inactive for the course status.');return Response::redirect($returnUrl);}
+        try{$pdo=$this->database->connection();$q=$pdo->prepare('SELECT code,status FROM courses WHERE id=:id');$q->execute(['id'=>$id]);$course=$q->fetch(PDO::FETCH_ASSOC);if(!$course)throw new \RuntimeException('Course not found.');$pdo->prepare('UPDATE courses SET status=:status WHERE id=:id')->execute(['status'=>$status,'id'=>$id]);$this->audit($pdo,'course.status_updated','course',$id,['previous_status'=>$course['status'],'status'=>$status]);$this->session->flash('success',$course['code'].' is now '.$status.'.');}
+        catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}
+        return Response::redirect($returnUrl);
     }
 
 
@@ -714,9 +735,9 @@ final class Application
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
         $q=$pdo->prepare('SELECT * FROM exam_calendar_dates WHERE cycle_id=:id AND is_exam_day=1 ORDER BY exam_date');$q->execute(['id'=>$cycleId]);$dates=$q->fetchAll(PDO::FETCH_ASSOC);
         $q=$pdo->prepare("SELECT e.id,e.exam_date,es.name AS shift_name,es.start_time,es.end_time,es.sequence_no,c.code AS course_code,c.name AS course_name,
-            p.id AS programme_id,p.name AS programme_name,p.code AS programme_code,ec.batch_id,b.label AS batch_label,ec.semester,ec.display_label,
+            p.id AS programme_id,p.name AS programme_name,p.code AS programme_code,s.name AS school_name,ec.batch_id,b.label AS batch_label,ec.semester,ec.display_label,
             (SELECT COUNT(*) FROM exam_eligibility ee JOIN students st ON st.id=ee.student_id WHERE ee.examination_id=e.id AND ee.eligibility_status='eligible' AND st.programme_id=ec.programme_id AND (ec.batch_id IS NULL OR st.batch_id=ec.batch_id)) AS eligible_count
-            FROM examinations e JOIN exam_shifts es ON es.id=e.shift_id JOIN courses c ON c.id=e.course_id JOIN examination_cohorts ec ON ec.examination_id=e.id JOIN programmes p ON p.id=ec.programme_id LEFT JOIN batches b ON b.id=ec.batch_id
+            FROM examinations e JOIN exam_shifts es ON es.id=e.shift_id JOIN courses c ON c.id=e.course_id JOIN examination_cohorts ec ON ec.examination_id=e.id JOIN programmes p ON p.id=ec.programme_id JOIN schools s ON s.id=p.school_id LEFT JOIN batches b ON b.id=ec.batch_id
             WHERE e.cycle_id=:id AND e.status<>'cancelled' ORDER BY p.code,ec.batch_id,ec.semester,e.exam_date,es.sequence_no,c.code");$q->execute(['id'=>$cycleId]);$papers=$q->fetchAll(PDO::FETCH_ASSOC);
         $matrix=[];foreach($papers as $paper){
             // Render one line per branch/batch/semester even when multiple branches
@@ -725,7 +746,8 @@ final class Application
             if(!isset($matrix[$key])){$batch=$paper['batch_label']?' · '.$paper['batch_label']:'';$matrix[$key]=['programme_code'=>$paper['programme_code'],'label'=>$paper['display_label']?:$paper['programme_code'].' — '.$paper['programme_name'].$batch.' · Semester '.$paper['semester'],'cells'=>[]];}
             $matrix[$key]['cells'][$paper['exam_date']][]=$paper;
         }
-        return compact('cycle','dates','papers','matrix')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $schoolNames=array_values(array_unique(array_filter(array_column($papers,'school_name'))));
+        return compact('cycle','dates','papers','matrix','schoolNames')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function scheduleData(int $cycleId): array
@@ -750,10 +772,10 @@ final class Application
     {
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
         $schools=$pdo->query("SELECT id,code,name,short_name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-        $cycleBatchQuery=$pdo->prepare("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year,b.label");$cycleBatchQuery->execute(['cycle'=>$cycleId]);$cycleBatches=$cycleBatchQuery->fetchAll(PDO::FETCH_ASSOC);$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatches,'programme_id'))));
-        $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);if($cycleProgrammeIds)$programmes=array_values(array_filter($programmes,static fn(array $p):bool=>in_array((int)$p['id'],$cycleProgrammeIds,true)));
+        $cycleBatchQuery=$pdo->prepare("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year,p.duration_semesters FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year,b.label");$cycleBatchQuery->execute(['cycle'=>$cycleId]);$cycleBatches=$cycleBatchQuery->fetchAll(PDO::FETCH_ASSOC);$regularSemesterScope=[];$currentSemesterMode=BatchProgression::usesCurrentSemester($cycle);if($currentSemesterMode){foreach($cycleBatches as &$cycleBatch){$progress=BatchProgression::calculate($cycle,$cycleBatch,(int)$cycleBatch['duration_semesters']);$cycleBatch['study_year']=$progress['study_year'];$cycleBatch['current_semester']=$progress['semester'];$cycleBatch['is_current']=$progress['active'];}unset($cycleBatch);$cycleBatches=array_values(array_filter($cycleBatches,static fn(array $batch):bool=>!empty($batch['is_current'])));$regularSemesterScope=array_values(array_unique(array_map('intval',array_column($cycleBatches,'current_semester'))));sort($regularSemesterScope);}$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatches,'programme_id'))));
+        $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);if($currentSemesterMode||$cycleProgrammeIds)$programmes=array_values(array_filter($programmes,static fn(array $p):bool=>in_array((int)$p['id'],$cycleProgrammeIds,true)));
         $curriculumQuery=$pdo->prepare("SELECT pc.id,pc.programme_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE c.status='active' AND p.status='active' AND (pc.batch_id IN (SELECT batch_id FROM exam_cycle_batches WHERE cycle_id=:cycle) OR pc.batch_id IS NULL) ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code");$curriculumQuery->execute(['cycle'=>$cycleId]);$curriculum=$curriculumQuery->fetchAll(PDO::FETCH_ASSOC);
-        $curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
+        if($currentSemesterMode){$batchScope=[];$programmeSemesters=[];foreach($cycleBatches as $batch){$batchScope[(int)$batch['id']]=(int)$batch['current_semester'];$programmeSemesters[(int)$batch['programme_id']][(int)$batch['current_semester']]=true;}$curriculum=array_values(array_filter($curriculum,static function(array $item)use($batchScope,$programmeSemesters):bool{return $item['batch_id']?(($batchScope[(int)$item['batch_id']]??0)===(int)$item['semester']):isset($programmeSemesters[(int)$item['programme_id']][(int)$item['semester']]);}));}$curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
         $last=$this->session->pullFlash('validation_result');
         $selection=$this->session->get('automatic_scope_'.$cycleId,[]);
         $runQuery=$pdo->prepare("SELECT id,school_id,rule_snapshot FROM scheduling_runs WHERE cycle_id=:cycle AND status IN ('ready','generated','approved','published','failed') ORDER BY id DESC LIMIT 1");$runQuery->execute(['cycle'=>$cycleId]);$savedRun=$runQuery->fetch(PDO::FETCH_ASSOC);
@@ -767,7 +789,7 @@ final class Application
             $selection=['cycle_id'=>$cycleId,'school_id'=>(int)$savedRun['school_id'],'programme_ids'=>$savedProgrammeIds,'batch_ids'=>$savedBatchIds,'semesters'=>$savedSemesters,'programme_course_ids'=>$savedCourseIds,'subject_selection_active'=>1,'minimum_gap_days'=>(int)($snapshot['minimum_gap_days']??1),'maximum_papers_per_day'=>(int)($snapshot['maximum_papers_per_day']??1),'avoid_consecutive_days'=>!empty($snapshot['avoid_consecutive_days'])?1:null,'use_subject_priority'=>!empty($snapshot['use_subject_priority'])?1:null,'restored_run_id'=>(int)$savedRun['id']];
             $this->session->put('automatic_scope_'.$cycleId,$selection);
         }
-        return compact('cycle','schools','programmes','curriculum','selection','cycleBatches')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
+        return compact('cycle','schools','programmes','curriculum','selection','cycleBatches','regularSemesterScope')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
     }
 
     private function validateAutomaticSchedule(Request $request,int $cycleId): Response
@@ -839,7 +861,22 @@ final class Application
 
     private function automaticRunCsv(int $cycleId,int $runId):Response
     {
-        $data=$this->automaticRunData($cycleId,$runId);$handle=fopen('php://temp','r+');fputcsv($handle,['Programme','Semester','Subject Code','Subject Name','Priority','Exam Date','Shift','Eligible Students','Status','Placement Reason']);foreach($data['items'] as $item)fputcsv($handle,[$item['programme_code'],(int)$item['semester'],$item['course_code'],$item['course_name'],(int)$item['subject_priority'],$item['assigned_date'],$item['shift_name'],(int)$item['eligible_count'],$item['item_status'],$item['reason']]);rewind($handle);$csv=stream_get_contents($handle);fclose($handle);return Response::csv((string)$csv,'gbu-date-sheet-run-'.$runId.'.csv');
+        $data=$this->automaticRunData($cycleId,$runId);$handle=fopen('php://temp','r+');fputcsv($handle,['Programme Code','Programme Name','Semester','Subject Code','Subject Name','Priority','Exam Date','Shift','Eligible Students','Status','Placement Reason']);foreach($data['items'] as $item)fputcsv($handle,[$item['programme_code'],$item['programme_name'],(int)$item['semester'],$item['course_code'],$item['course_name'],(int)$item['subject_priority'],$item['assigned_date'],$item['shift_name'],(int)$item['eligible_count'],$item['item_status'],$item['reason']]);rewind($handle);$csv=stream_get_contents($handle);fclose($handle);return Response::csv((string)$csv,'gbu-date-sheet-run-'.$runId.'.csv');
+    }
+
+    private function automaticRunXlsx(int $cycleId,int $runId):Response
+    {
+        // Confirm that the requested run belongs to this examination cycle, then
+        // export the same official matrix that users see on the date-sheet page.
+        $this->automaticRunData($cycleId,$runId);
+        return $this->dateSheetXlsx($cycleId,'gbu-date-sheet-run-'.$runId.'.xlsx');
+    }
+
+    private function dateSheetXlsx(int $cycleId,?string $filename=null):Response
+    {
+        $data=$this->dateSheetData($cycleId);$headers=['Programme / Branch, Batch and Semester'];foreach($data['dates'] as $date)$headers[]=date('d M Y',strtotime($date['exam_date']));$rows=[];
+        foreach($data['matrix'] as $matrixRow){$row=[$matrixRow['label']];foreach($data['dates'] as $date){$papers=$matrixRow['cells'][$date['exam_date']]??[];$entries=[];foreach($papers as $paper)$entries[]=$paper['course_code'].' — '.$paper['course_name']."\n".$paper['shift_name'].' · '.substr($paper['start_time'],0,5).'-'.substr($paper['end_time'],0,5);$row[]=implode("\n\n",$entries);}$rows[]=$row;}
+        $widths=array_merge([30],array_fill(0,count($data['dates']),22));$schoolName=$data['schoolNames']?implode(' / ',$data['schoolNames']):'Examination Cell';$dateRange=date('d F Y',strtotime($data['cycle']['start_date'])).' to '.date('d F Y',strtotime($data['cycle']['end_date']));$logoPath=BASE_PATH.'/public/assets/images/gbu-emblem.png';$logo=is_file($logoPath)?file_get_contents($logoPath):null;$bytes=(new XlsxExporter())->build($data['cycle']['name'],$schoolName,$dateRange,$headers,$rows,$widths,$logo?:null);return Response::xlsx($bytes,$filename??'gbu-date-sheet-cycle-'.$cycleId.'.xlsx');
     }
 
     private function stageDateSheetImport(Request $request,int $cycleId): Response
@@ -1024,6 +1061,30 @@ final class Application
         $data=['school_id'=>(int)$request->input('school_id'),'code'=>strtoupper(trim((string)$request->input('code'))),'name'=>trim((string)$request->input('name')),'level'=>(string)$request->input('level','undergraduate'),'duration_semesters'=>(int)$request->input('duration_semesters')?:null,'lateral_entry'=>$request->input('lateral_entry')?1:0,'legacy'=>$request->input('legacy')?1:0,'status'=>'active'];
         if(!$data['school_id']||$data['code']===''||$data['name']===''){$this->session->flash('error','School, programme code, and programme name are required.');return Response::redirect(url('masters/programmes'));}
         try{$pdo=$this->database->connection();$keys=array_keys($data);$pdo->prepare('INSERT INTO programmes('.implode(',',$keys).') VALUES('.implode(',',array_map(fn($k)=>":{$k}",$keys)).')')->execute($data);$this->audit($pdo,'programme.created','programme',(int)$pdo->lastInsertId(),$data);$this->session->flash('success','Programme mapping created.');}catch(\Throwable){$this->session->flash('error','Programme code must be unique.');}return Response::redirect(url('masters/programmes'));
+    }
+
+    private function programmeImportTemplate(): Response
+    {
+        return Response::csv("\xEF\xBB\xBFSchool Code,Programme Code,Programme Name,Level,Duration Semesters,Lateral Entry,Legacy,Status\r\nICT,UCS,B.Tech Computer Science and Engineering,undergraduate,8,no,no,active\r\nICT,ICS,Integrated B.Tech Computer Science and Engineering,integrated,10,no,no,active\r\n",'gbu-programme-import-template.csv');
+    }
+
+    private function stageProgrammeImport(Request $request): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token'))){$this->session->flash('error','Your session token expired.');return Response::redirect(url('masters/programmes/import'));}
+        $file=$_FILES['programme_file']??null;if(!$file||$file['error']!==UPLOAD_ERR_OK){$this->session->flash('error','Choose a CSV or XLSX file to upload.');return Response::redirect(url('masters/programmes/import'));}
+        $extension=strtolower(pathinfo($file['name'],PATHINFO_EXTENSION));if(!in_array($extension,['csv','xlsx'],true)||(int)$file['size']>10*1024*1024){$this->session->flash('error','Upload a CSV or XLSX file smaller than 10 MB.');return Response::redirect(url('masters/programmes/import'));}
+        $stored=sprintf('programmes_%s_%s.%s',date('Ymd_His'),bin2hex(random_bytes(6)),$extension);$destination=BASE_PATH.'/storage/imports/'.$stored;if(!move_uploaded_file($file['tmp_name'],$destination))$destination=(string)$file['tmp_name'];
+        try{$id=(new ProgrammeImportService($this->database->connection()))->stage($destination,$file['name'],(int)$this->auth->user()['id']);return Response::redirect(url("masters/programmes/import/{$id}"));}catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url('masters/programmes/import'));}
+    }
+
+    private function programmeImportPreview(int $id): array
+    {
+        $pdo=$this->database->connection();$q=$pdo->prepare("SELECT * FROM import_batches WHERE id=:id AND import_type='programmes'");$q->execute(['id'=>$id]);$batch=$q->fetch(PDO::FETCH_ASSOC);if(!$batch)throw new \RuntimeException('Programme import batch not found.');$q=$pdo->prepare('SELECT *,source_row_number AS row_number FROM import_rows WHERE import_batch_id=:id ORDER BY source_row_number');$q->execute(['id'=>$id]);return ['batch'=>$batch,'rows'=>$q->fetchAll(PDO::FETCH_ASSOC),'error'=>$this->session->pullFlash('error')];
+    }
+
+    private function commitProgrammeImport(Request $request,int $id): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("masters/programmes/import/{$id}"));$pdo=$this->database->connection();try{$pdo->beginTransaction();$count=(new ProgrammeImportService($pdo))->commit($id,(int)$this->auth->user()['id']);$pdo->commit();$this->session->flash('success',"{$count} programmes imported.");return Response::redirect(url('masters/programmes'));}catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());return Response::redirect(url("masters/programmes/import/{$id}"));}
     }
 
     private function saveProgrammeDuration(Request $request,int $id): Response

@@ -2,6 +2,16 @@ CREATE DATABASE IF NOT EXISTS gbu_exam_operations
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE gbu_exam_operations;
 
+-- GBU Examination Operations complete canonical schema.
+-- The InfinityFree package builder removes the database-selection block above
+-- when producing the provider-compatible import files.
+-- Compatible with MariaDB 10.4+ and MySQL 8+ using an utf8mb4 database.
+-- Design domains: identity, academic masters, people, rooms, examination
+-- planning, seating, operations, imports, audit and system configuration.
+
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- Identity and role governance
 CREATE TABLE roles (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   code VARCHAR(40) NOT NULL UNIQUE,
@@ -23,6 +33,7 @@ CREATE TABLE users (
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles(id)
 ) ENGINE=InnoDB;
 
+-- Academic master data and batch-specific curriculum
 CREATE TABLE schools (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   code VARCHAR(30) NOT NULL UNIQUE,
@@ -101,6 +112,7 @@ CREATE TABLE programme_courses (
   CONSTRAINT fk_programme_courses_course FOREIGN KEY (course_id) REFERENCES courses(id)
 ) ENGINE=InnoDB;
 
+-- Students and faculty
 CREATE TABLE students (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   programme_id BIGINT UNSIGNED NULL,
@@ -152,6 +164,7 @@ CREATE TABLE faculty (
   CONSTRAINT fk_faculty_department FOREIGN KEY (department_id) REFERENCES departments(id)
 ) ENGINE=InnoDB;
 
+-- Physical rooms and generated seat coordinates
 CREATE TABLE rooms (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   code VARCHAR(60) NOT NULL UNIQUE,
@@ -185,6 +198,7 @@ CREATE TABLE room_seats (
   CONSTRAINT fk_room_seats_room FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Examination cycles, calendars and deterministic scheduling
 CREATE TABLE exam_cycles (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(190) NOT NULL,
@@ -351,6 +365,7 @@ CREATE TABLE scheduling_conflicts (
   CONSTRAINT fk_scheduling_conflicts_run FOREIGN KEY (scheduling_run_id) REFERENCES scheduling_runs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Versioned seating plans and exception handling
 CREATE TABLE seating_allocations (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   cycle_id BIGINT UNSIGNED NOT NULL,
@@ -400,6 +415,7 @@ CREATE TABLE seating_unallocated (
   CONSTRAINT fk_unallocated_student FOREIGN KEY (student_id) REFERENCES students(id)
 ) ENGINE=InnoDB;
 
+-- Attendance, invigilation and replacements
 CREATE TABLE faculty_availability (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   faculty_id BIGINT UNSIGNED NOT NULL,
@@ -470,9 +486,10 @@ CREATE TABLE replacement_requests (
   CONSTRAINT fk_replacements_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
+-- Staged CSV/XLSX imports, validation rows and errors
 CREATE TABLE import_batches (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  import_type ENUM('students','faculty','rooms','courses','date_sheet','eligibility') NOT NULL,
+  import_type ENUM('students','faculty','rooms','courses','programmes','date_sheet','eligibility') NOT NULL,
   original_filename VARCHAR(255) NOT NULL,
   stored_filename VARCHAR(255) NOT NULL,
   status ENUM('uploaded','validating','review','committed','failed','cancelled') NOT NULL DEFAULT 'uploaded',
@@ -511,6 +528,7 @@ CREATE TABLE import_rows (
   CONSTRAINT fk_import_rows_batch FOREIGN KEY (import_batch_id) REFERENCES import_batches(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Audit history and application settings
 CREATE TABLE audit_logs (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT UNSIGNED NULL,

@@ -38,6 +38,15 @@ final class Response
             'Content-Disposition' => 'attachment; filename="' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $filename) . '"']);
     }
 
+    public static function xlsx(string $content, string $filename): self
+    {
+        return new self($content, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $filename) . '"',
+            'Content-Length' => (string) strlen($content),
+        ]);
+    }
+
     public function send(): void
     {
         http_response_code($this->status);
