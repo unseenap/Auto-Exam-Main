@@ -2,7 +2,7 @@ CREATE DATABASE IF NOT EXISTS gbu_exam_operations
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE gbu_exam_operations;
 
--- GBU Examination Operations complete canonical schema.
+-- Exam Scheduling and Management System complete canonical schema.
 -- The InfinityFree package builder removes the database-selection block above
 -- when producing the provider-compatible import files.
 -- Compatible with MariaDB 10.4+ and MySQL 8+ using an utf8mb4 database.

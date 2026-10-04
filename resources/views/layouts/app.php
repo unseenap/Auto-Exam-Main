@@ -71,7 +71,7 @@
   </aside><button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>
   <div class="app-frame">
     <header class="topbar">
-      <div class="topbar-title"><button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Toggle navigation" aria-controls="app-sidebar" aria-expanded="true"><span aria-hidden="true"></span></button><div><p>Examination operations</p><strong><?= e($pageTitle ?? 'Dashboard') ?></strong></div></div>
+      <div class="topbar-title"><button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Toggle navigation" aria-controls="app-sidebar" aria-expanded="true"><span aria-hidden="true"></span></button><div><p>Exam Scheduling and Management System</p><strong><?= e($pageTitle ?? 'Dashboard') ?></strong></div></div>
       <div class="topbar-meta"><span><?= e(date('l, d F Y')) ?></span><b>Asia/Kolkata</b></div>
     </header>
     <main id="main-content" class="content"><?= $content ?></main>

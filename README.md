@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/assets/images/gbu-full-logo.png" alt="Gautam Buddha University" width="360">
 
-  # Automated Examination Operations Platform
+  # Exam Scheduling and Management System
 
   **A role-governed university platform for curriculum management, automatic date-sheet generation, room-aware seating, attendance, invigilation, replacements, audit and reporting.**
 
@@ -12,7 +12,7 @@
 
 ## About the application
 
-The **GBU Examination Operations Platform** centralises the operational work required to conduct university examinations. It connects academic records, subject curricula, examination schedules, physical room layouts, student seating, attendance and faculty invigilation in one controlled workflow.
+The **Exam Scheduling and Management System** centralises the operational work required to conduct university examinations. It connects academic records, subject curricula, examination schedules, physical room layouts, student seating, attendance and faculty invigilation in one controlled workflow.
 
 The system is designed for Gautam Buddha University and follows its school, programme and roll-number conventions. It replaces disconnected spreadsheets with validated imports, deterministic allocation, role-based access and an auditable record of operational changes.
 
@@ -381,7 +381,7 @@ C:\xampp\mysql\bin\mysql.exe -u root -D gbu_exam_operations -e "source C:/xampp/
 ### Environment configuration
 
 ```env
-APP_NAME="GBU Examination Operations"
+APP_NAME="Exam Scheduling and Management System"
 APP_ENV=local
 APP_DEBUG=true
 APP_URL=http://localhost/Auto-Exam-Main/public
@@ -476,6 +476,6 @@ Print actions use the browser print dialog; choose **Save as PDF** for official 
 ---
 
 <div align="center">
-  <strong>Gautam Buddha University — Examination Operations</strong><br>
+  <strong>Gautam Buddha University — Exam Scheduling and Management System</strong><br>
   Greater Noida, Uttar Pradesh, India
 </div>

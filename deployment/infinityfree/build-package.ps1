@@ -4,7 +4,7 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $packageRoot = Join-Path $PSScriptRoot 'package'
 $uploadRoot = Join-Path $packageRoot 'UPLOAD_TO_HTDOCS'
 $setupRoot = Join-Path $packageRoot 'SETUP'
-$zipPath = Join-Path $PSScriptRoot 'Auto-Exam-InfinityFree-Ready.zip'
+$zipPath = Join-Path $PSScriptRoot 'Exam-Scheduling-Management-System-InfinityFree-Ready.zip'
 
 if (Test-Path -LiteralPath $packageRoot) {
     $resolvedPackage = (Resolve-Path -LiteralPath $packageRoot).Path
@@ -59,7 +59,7 @@ ON DUPLICATE KEY UPDATE
 '@
 
 $sqlHeader = @'
--- GBU Examination Operations: InfinityFree clean-install database
+-- Exam Scheduling and Management System: InfinityFree clean-install database
 -- Select the provider-assigned database in phpMyAdmin before importing.
 -- Generated from database/schema.sql and database/seed.sql.
 SET NAMES utf8mb4;
@@ -69,7 +69,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 $sqlFooter = "`r`nSET FOREIGN_KEY_CHECKS = 1;`r`n"
 $schemaContent = $sqlHeader + $dropStatements + "`r`n`r`n" + ($portableSchema -join "`r`n") + $sqlFooter
 $seedContent = @'
--- GBU Examination Operations: InfinityFree seed data
+-- Exam Scheduling and Management System: InfinityFree seed data
 -- Import this only after infinityfree_schema.sql, with the assigned database selected.
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
@@ -81,7 +81,7 @@ Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_seed.sql') -Value $
 Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_database_import.sql') -Value $sqlContent -Encoding utf8
 
 $credentials = @'
-GBU Examination Operations — temporary administrator
+Exam Scheduling and Management System — temporary administrator
 
 Login URL: https://YOUR-DOMAIN/login
 Username: admin

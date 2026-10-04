@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0d3b31">
-  <title>Sign in | GBU Examination Operations</title>
+  <title>Sign in | Exam Scheduling and Management System</title>
   <link rel="stylesheet" href="<?= e(url('assets/css/app.css')) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/vendor/tabler-icons/tabler-icons.min.css?v=3.46.0')) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/icon-system.css?v='.(string)filemtime(BASE_PATH.'/public/assets/css/icon-system.css'))) ?>">
@@ -19,7 +19,7 @@
         <span>Examination Cell</span>
       </header>
       <div class="login-message">
-        <p class="login-kicker">Examination Operations Portal</p>
+        <p class="login-kicker">Exam Scheduling and Management System</p>
         <h1 id="portal-title">The right access for every examination duty.</h1>
         <p>Role-governed planning for date sheets, curriculum, rooms, seating, attendance, invigilation, and compliance.</p>
         <div class="login-role-strip" aria-label="Role governed access"><span>Academic</span><span>Examinations</span><span>Seating</span><span>Invigilation</span><span>Audit</span></div>

@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Extend the GBU Examination Operations Platform so an authorized examination user can generate a complete draft date sheet for every selected programme and semester within a school in one operation.
+Extend the Exam Scheduling and Management System so an authorized examination user can generate a complete draft date sheet for every selected programme and semester within a school in one operation.
 
 The generator must:
 
