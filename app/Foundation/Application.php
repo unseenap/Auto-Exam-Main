@@ -648,7 +648,8 @@ final class Application
 
     private function courseData(): array
     {
-        $pdo=$this->database->connection();return ['courses'=>$pdo->query("SELECT c.*,pc.id AS mapping_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.course_credits,pc.course_level,pc.course_year,pc.mid_sem_duration_minutes,pc.end_sem_duration_minutes,pc.subject_priority,p.id AS programme_id,p.code AS programme_code,p.name AS programme_name,b.label AS batch_label,d.name AS department_name,s.short_name AS school_name FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id LEFT JOIN departments d ON d.id=p.department_id JOIN schools s ON s.id=p.school_id ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code")->fetchAll(PDO::FETCH_ASSOC),'programmes'=>$this->programmeOptions(),'batches'=>$this->batchOptions(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $programmes=$this->programmeOptions();
+        return (new \App\Exams\CourseRegister($this->database->connection()))->load($_GET,$programmes)+['programmes'=>$programmes,'batches'=>$this->batchOptions(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveCourse(Request $request): Response
@@ -663,6 +664,7 @@ final class Application
     private function updateCourseStatus(Request $request,int $id): Response
     {
         $programme=strtoupper(trim((string)$request->input('return_programme','')));$batchId=max(0,(int)$request->input('return_batch_id',0));$semester=max(0,min(12,(int)$request->input('return_semester',0)));$params=[];if(preg_match('/^[A-Z0-9-]{1,20}$/',$programme))$params['programme']=$programme;if($batchId)$params['batch_id']=$batchId;if($semester)$params['semester']=$semester;$returnUrl=url('courses').($params?'?'.http_build_query($params):'');
+        $returnPage=max(1,(int)$request->input('return_page',1));if($returnPage>1)$returnUrl.=(str_contains($returnUrl,'?')?'&':'?').'page='.$returnPage;
         if(!$this->session->validCsrf((string)$request->input('_token'))){$this->session->flash('error','Your session token expired. Reload the page and try again.');return Response::redirect($returnUrl);}
         $status=strtolower(trim((string)$request->input('status')));if(!in_array($status,['active','inactive'],true)){$this->session->flash('error','Select Active or Inactive for the course status.');return Response::redirect($returnUrl);}
         try{$pdo=$this->database->connection();$q=$pdo->prepare('SELECT code,status FROM courses WHERE id=:id');$q->execute(['id'=>$id]);$course=$q->fetch(PDO::FETCH_ASSOC);if(!$course)throw new \RuntimeException('Course not found.');$pdo->prepare('UPDATE courses SET status=:status WHERE id=:id')->execute(['status'=>$status,'id'=>$id]);$this->audit($pdo,'course.status_updated','course',$id,['previous_status'=>$course['status'],'status'=>$status]);$this->session->flash('success',$course['code'].' is now '.$status.'.');}
