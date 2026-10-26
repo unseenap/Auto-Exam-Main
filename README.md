@@ -61,6 +61,10 @@ The system is designed for Gautam Buddha University and follows its school, prog
 | Reports | Seating, attendance, date-sheet and operational CSV/print outputs |
 | Governance | Eight application roles, CSRF protection, session control and audit logs |
 
+## Academic progression
+
+Student year, semester and session now advance automatically from the academic calendar, with term history, core-course registrations and individual exceptions. The new **Academic progression** screen provides calendar settings, future previews, current reconciliation and completion review. See [Academic progression operations](docs/ACADEMIC-PROGRESSION.md) for the upgrade, daily task and exception rules.
+
 ## Latest updates
 
 The current revision adds the following operational and UI improvements:
@@ -334,7 +338,7 @@ Each room defines rows, columns and either `row_major` or `column_major` allocat
 
 ## Database design
 
-The current schema contains **35 tables** grouped into these domains:
+The current schema contains **41 tables** grouped into these domains:
 
 | Domain | Principal tables |
 |---|---|
@@ -346,8 +350,9 @@ The current schema contains **35 tables** grouped into these domains:
 | Seating | `seating_allocations`, `seating_assignments`, `seating_unallocated` |
 | Operations | `invigilation_allocations`, `attendance`, `replacement_requests` |
 | Imports | `import_batches`, `import_rows`, `import_errors` |
+| Academic progression | `academic_rollover_settings`, `academic_rollover_runs`, `student_progression_controls`, `student_term_enrollments`, `student_course_registrations`, `student_academic_history` |
 
-The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean local installation: import the schema first and import the seed second. The schema creates and selects `gbu_exam_operations`, then defines all 35 tables, indexes and foreign keys for scheduling, staged `programmes` imports and active/inactive curriculum status. The InfinityFree package builder automatically removes the local database-selection block when generating provider-compatible SQL files.
+The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean local installation: import the schema first and import the seed second. The schema creates and selects `gbu_exam_operations`, then defines all 41 tables, indexes and foreign keys for scheduling, staged `programmes` imports and active/inactive curriculum status. The InfinityFree package builder automatically removes the local database-selection block when generating provider-compatible SQL files.
 
 ## Local installation
 
@@ -479,3 +484,8 @@ Print actions use the browser print dialog; choose **Save as PDF** for official 
   <strong>Gautam Buddha University — Exam Scheduling and Management System</strong><br>
   Greater Noida, Uttar Pradesh, India
 </div>
+
+
+Room ownership is enforced by school. Choose a school when creating a room; room imports accept a School Code column or a default school for older files. Seating interleaves papers within each school and never uses another school’s spare seats. Manual corrections and publication enforce the same rule. See [room school setup](docs/ROOM-SCHOOLS.md) for existing installations.
+
+Seating generation now supports two selected branch/batch groups per room, including different years of the same branch. The print view and Excel download follow the supplied university seating form. See [paired seating](docs/PAIRED-SEATING.md) for the workflow and validation rules.

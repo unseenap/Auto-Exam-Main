@@ -1,0 +1,2 @@
+Original cell styles and colour theme from the user-supplied Morning Shift seating plan 16-10-2026.xlsx. No student records are included. The application generates room cells, desk labels, summaries and print ranges from the actual room geometry.
+The first invigilator drawing is also preserved as a reusable vector shape. layout.json holds the original 12-column form widths. These files contain no student records.

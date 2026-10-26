@@ -16,8 +16,8 @@ The reference has two shifts (09:30-12:30 and 14:00-17:00), programme/batch/seme
 - Shared-paper moves validate all attached cohorts. Approved or published drafts cannot be edited through the review service.
 - Regeneration defers deletion until generation's transaction; an exception rolls back deletion. Shared papers with cohorts outside the regeneration scope are protected.
 - Seating interleaves papers rather than programme names, respects each room's usable capacity and blocked seats, and refuses publication with unallocated students or over-capacity/inactive rooms.
-- Date-sheet imports accept optional Batch Label and pipe-separated Roll Numbers. Batches must already exist under the programme. Repeat/special and elective papers require explicit registrations; repeated students may be in a later current semester.
-- Automatic elective/back-paper eligibility is pending, not assumed. Explicit registration import confirms selected students and excludes the remaining pending students in that cohort. Seating waits until pending registrations have been resolved.
+- Date-sheet imports accept optional Batch Label and pipe-separated Roll Numbers. Batches must already exist under the programme. Repeat/special papers require explicit registrations; department-assigned electives cover the whole class; repeated students may be in a later current semester.
+- Department-assigned electives are eligible for the entire matching class. Back-paper eligibility remains pending until confirmed. Explicit registration import confirms selected students and excludes the remaining pending students in that cohort. Seating waits until pending registrations have been resolved.
 
 ## Recommended workflow
 
@@ -26,7 +26,7 @@ For an already approved university date sheet, use date-sheet CSV/XLSX import to
 1. Create the examination cycle and the official 09:30-12:30 / 14:00-17:00 shifts; enter university holidays explicitly.
 2. Open the cycle's date-sheet import page and download its CSV template.
 3. Enter one row per programme/semester/paper using the official date and shift. For a combined UG/PG row, supply separate rows for the actual programme/semester combinations with the same course code and session. Do not invent programme codes.
-4. Use Batch Label where needed, and Roll Numbers separated by `|` for repeat/elective registrations. The label must exactly match the existing batch master. Regular papers with no roll list use the active cohort.
+4. Use Batch Label where needed, and Roll Numbers separated by `|` for repeat/special registrations. The label must exactly match the existing batch master. Regular papers with no roll list use the active cohort.
 5. Validate the upload and review its registration scope before committing. Resolve any pending registrations before seating.
 6. Choose a date/shift, select rooms, generate seating, review unallocated students and physical placement, then publish only a complete allocation.
 

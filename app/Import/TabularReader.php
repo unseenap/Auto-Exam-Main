@@ -38,11 +38,8 @@ final class TabularReader
         $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
         if ($sharedXml !== false) {
             $xml = new SimpleXMLElement($sharedXml);
-            foreach ($xml->si as $item) {
-                $parts = [];
-                if (isset($item->t)) $parts[] = (string) $item->t;
-                foreach ($item->r as $run) $parts[] = (string) $run->t;
-                $shared[] = implode('', $parts);
+            foreach ($xml->xpath('./*[local-name()="si"]') as $item) {
+                $shared[] = $this->spreadsheetText($item);
             }
         }
         $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
@@ -50,16 +47,21 @@ final class TabularReader
         if ($sheetXml === false) throw new RuntimeException('The first worksheet is missing.');
         $sheet = new SimpleXMLElement($sheetXml);
         $rows = [];
-        foreach ($sheet->sheetData->row as $row) {
+        // XLSX writers may use a default namespace or an explicit prefix such
+        // as x:. SimpleXML property access silently misses prefixed elements.
+        foreach ($sheet->xpath('./*[local-name()="sheetData"]/*[local-name()="row"]') as $row) {
             $values = [];
-            foreach ($row->c as $cell) {
+            foreach ($row->xpath('./*[local-name()="c"]') as $cell) {
                 $reference = (string) $cell['r'];
                 preg_match('/^[A-Z]+/', $reference, $match);
                 $column = $this->columnIndex($match[0] ?? 'A');
                 $type = (string) $cell['t'];
-                $value = (string) $cell->v;
+                $value = (string) (($cell->xpath('./*[local-name()="v"]'))[0] ?? '');
                 if ($type === 's') $value = $shared[(int) $value] ?? '';
-                elseif ($type === 'inlineStr') $value = (string) $cell->is->t;
+                elseif ($type === 'inlineStr') {
+                    $inline = $cell->xpath('./*[local-name()="is"]');
+                    $value = isset($inline[0]) ? $this->spreadsheetText($inline[0]) : '';
+                }
                 $values[$column] = trim($value);
             }
             if ($values) {
@@ -68,6 +70,12 @@ final class TabularReader
             }
         }
         return $rows;
+    }
+
+    private function spreadsheetText(SimpleXMLElement $node): string
+    {
+        $parts = $node->xpath('./*[local-name()="t"] | ./*[local-name()="r"]/*[local-name()="t"]');
+        return implode('', array_map(static fn(SimpleXMLElement $part): string => (string) $part, $parts));
     }
 
     private function columnIndex(string $letters): int

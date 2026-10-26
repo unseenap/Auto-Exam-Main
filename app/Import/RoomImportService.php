@@ -12,8 +12,11 @@ final class RoomImportService
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function stage(string $path,string $originalName,int $userId): int
+    public function stage(string $path,string $originalName,int $userId,int $defaultSchoolId=0): int
     {
+        if($defaultSchoolId)(new \App\Rooms\SchoolRoomPolicy($this->pdo))->assertSchool($defaultSchoolId);
+        $schools=$this->pdo->query("SELECT id,code FROM schools WHERE status='active'")->fetchAll(PDO::FETCH_KEY_PAIR);
+        $schoolIds=array_change_key_case(array_flip($schools),CASE_UPPER);
         $rows=(new TabularReader())->read($path,strtolower(pathinfo($originalName,PATHINFO_EXTENSION)));
         if(count($rows)<2)throw new RuntimeException('The file must contain a header and at least one room row.');
         $headers=array_map([$this,'headerKey'],array_shift($rows));
@@ -22,6 +25,7 @@ final class RoomImportService
         $q->execute(['original'=>$originalName,'stored'=>basename($path),'user'=>$userId]);$batch=(int)$this->pdo->lastInsertId();$valid=0;$invalid=0;$seen=[];
         $insert=$this->pdo->prepare('INSERT INTO import_rows(import_batch_id,source_row_number,source_data,normalized_data,validation_status,validation_messages) VALUES(:batch,:row,:source,:normalized,:status,:messages)');
         foreach($rows as $index=>$values){$source=[];foreach($headers as $column=>$header)if($header!=='')$source[$header]=trim((string)($values[$column]??''));$messages=[];
+            $schoolCode=strtoupper(trim($source['school_code']??''));$schoolId=$schoolCode!==''?(int)($schoolIds[$schoolCode]??0):$defaultSchoolId;if(!$schoolId)$messages[]='Provide a valid School Code or choose the school for this upload.';
             $code=strtoupper(trim($source['room_code']??''));$building=trim($source['building']??'');$rowCount=(int)($source['rows']??0);$columnCount=(int)($source['columns']??0);
             $order=strtolower(trim($source['seat_order']??''))?:'column_major';$order=['row'=>'row_major','column'=>'column_major'][$order]??$order;
             $priority=trim($source['priority']??'')===''?100:(int)$source['priority'];$status=strtolower(trim($source['status']??''))?:'active';
@@ -32,7 +36,7 @@ final class RoomImportService
             if(isset($seen[$code]))$messages[]='Room code is duplicated in this file.';$seen[$code]=true;
             $dup=$this->pdo->prepare('SELECT COUNT(*) FROM rooms WHERE code=:code');$dup->execute(['code'=>$code]);if((int)$dup->fetchColumn())$messages[]='Room code already exists.';
             [$blocked,$blockedErrors]=$this->blockedCoordinates($source['disabled_seat_numbers']??'',max(0,$rowCount),max(0,$columnCount));array_push($messages,...$blockedErrors);
-            $data=['code'=>$code,'building'=>$building,'floor'=>trim($source['floor']??'')?:null,'rows_count'=>$rowCount,'columns_count'=>$columnCount,'physical_capacity'=>$rowCount*$columnCount,
+            $data=['school_id'=>$schoolId,'school_code'=>$schoolCode?:($schools[$schoolId]??''),'code'=>$code,'building'=>$building,'floor'=>trim($source['floor']??'')?:null,'rows_count'=>$rowCount,'columns_count'=>$columnCount,'physical_capacity'=>$rowCount*$columnCount,
                 'usable_capacity'=>max(0,$rowCount*$columnCount-count($blocked)),'seat_order'=>$order,'priority'=>$priority?:100,'status'=>$status,'notes'=>trim($source['notes']??'')?:null,'blocked'=>$blocked];
             $validation=$messages?'invalid':'valid';$messages?$invalid++:$valid++;$insert->execute(['batch'=>$batch,'row'=>$index+2,'source'=>json_encode($source),'normalized'=>json_encode($data),'status'=>$validation,'messages'=>json_encode($messages)]);
         }
@@ -43,8 +47,8 @@ final class RoomImportService
     {
         $q=$this->pdo->prepare("SELECT * FROM import_batches WHERE id=:id AND import_type='rooms' AND status='review' FOR UPDATE");$q->execute(['id'=>$batchId]);if(!$q->fetch())throw new RuntimeException('Room import is not available for commit.');
         $q=$this->pdo->prepare("SELECT * FROM import_rows WHERE import_batch_id=:id AND validation_status='valid' ORDER BY source_row_number");$q->execute(['id'=>$batchId]);$count=0;
-        $insert=$this->pdo->prepare('INSERT INTO rooms(code,building,floor,rows_count,columns_count,physical_capacity,usable_capacity,seat_order,priority,status,notes) VALUES(:code,:building,:floor,:rows_count,:columns_count,:physical_capacity,:usable_capacity,:seat_order,:priority,:status,:notes)');
-        foreach($q as $row){$data=json_decode($row['normalized_data'],true,flags:JSON_THROW_ON_ERROR);$blocked=$data['blocked'];unset($data['blocked']);$insert->execute($data);$roomId=(int)$this->pdo->lastInsertId();(new RoomSeatGenerator($this->pdo))->regenerate($roomId,(int)$data['rows_count'],(int)$data['columns_count'],$data['seat_order'],$blocked);$this->pdo->prepare('UPDATE import_rows SET committed_entity_id=:entity WHERE id=:id')->execute(['entity'=>$roomId,'id'=>$row['id']]);$count++;}
+        $insert=$this->pdo->prepare('INSERT INTO rooms(school_id,code,building,floor,rows_count,columns_count,physical_capacity,usable_capacity,seat_order,priority,status,notes) VALUES(:school_id,:code,:building,:floor,:rows_count,:columns_count,:physical_capacity,:usable_capacity,:seat_order,:priority,:status,:notes)');
+        foreach($q as $row){$data=json_decode($row['normalized_data'],true,flags:JSON_THROW_ON_ERROR);$blocked=$data['blocked'];unset($data['blocked'],$data['school_code']);(new \App\Rooms\SchoolRoomPolicy($this->pdo))->assertSchool((int)($data['school_id']??0));$insert->execute($data);$roomId=(int)$this->pdo->lastInsertId();(new RoomSeatGenerator($this->pdo))->regenerate($roomId,(int)$data['rows_count'],(int)$data['columns_count'],$data['seat_order'],$blocked);$this->pdo->prepare('UPDATE import_rows SET committed_entity_id=:entity WHERE id=:id')->execute(['entity'=>$roomId,'id'=>$row['id']]);$count++;}
         $this->pdo->prepare("UPDATE import_batches SET status='committed',committed_at=NOW() WHERE id=:id")->execute(['id'=>$batchId]);
         $this->pdo->prepare("INSERT INTO audit_logs(user_id,action,entity_type,entity_id,new_values) VALUES(:user,'room_import.committed','import_batch',:id,:data)")->execute(['user'=>$userId,'id'=>$batchId,'data'=>json_encode(['rooms_created'=>$count])]);return $count;
     }
@@ -59,6 +63,6 @@ final class RoomImportService
 
     private function headerKey(string $header): string
     {
-        $key=trim(preg_replace('/[^a-z0-9]+/','_',strtolower(trim($header)))??'','_');$aliases=['code'=>'room_code','room'=>'room_code','room_number'=>'room_code','rows_count'=>'rows','columns_count'=>'columns','cols'=>'columns','disabled_seats'=>'disabled_seat_numbers','blocked_seats'=>'disabled_seat_numbers','blocked_coordinates'=>'disabled_seat_numbers','order'=>'seat_order'];return $aliases[$key]??$key;
+        $key=trim(preg_replace('/[^a-z0-9]+/','_',strtolower(trim($header)))??'','_');$aliases=['school'=>'school_code','schoolcode'=>'school_code','code'=>'room_code','room'=>'room_code','room_number'=>'room_code','rows_count'=>'rows','columns_count'=>'columns','cols'=>'columns','disabled_seats'=>'disabled_seat_numbers','blocked_seats'=>'disabled_seat_numbers','blocked_coordinates'=>'disabled_seat_numbers','order'=>'seat_order'];return $aliases[$key]??$key;
     }
 }

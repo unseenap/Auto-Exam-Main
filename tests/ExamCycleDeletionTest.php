@@ -14,7 +14,8 @@ try{
     $cycle=$exams->createCycle(['name'=>'Delete cycle test','academic_year'=>'2026-2027','exam_type'=>'end_sem','start_date'=>'2026-09-15','end_date'=>'2026-09-15','duration'=>180,'shifts'=>[['name'=>'Morning','start'=>'09:30','end'=>'12:30','duration'=>180]]],$user);
     $mapping=$pdo->query("SELECT pc.* FROM programme_courses pc JOIN courses c ON c.id=pc.course_id WHERE c.name NOT LIKE '%Lab%' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $shift=(int)$pdo->query("SELECT id FROM exam_shifts WHERE cycle_id={$cycle}")->fetchColumn();
-    $exam=$exams->schedule(['cycle_id'=>$cycle,'shift_id'=>$shift,'course_id'=>$mapping['course_id'],'programme_id'=>$mapping['programme_id'],'semester'=>$mapping['semester'],'exam_date'=>'2026-09-15','category'=>'regular','display_label'=>'Test']);
+    $batchLabel='';if($mapping['batch_id']){$q=$pdo->prepare('SELECT label FROM batches WHERE id=?');$q->execute([$mapping['batch_id']]);$batchLabel=(string)$q->fetchColumn();}
+    $exam=$exams->schedule(['cycle_id'=>$cycle,'shift_id'=>$shift,'course_id'=>$mapping['course_id'],'programme_id'=>$mapping['programme_id'],'semester'=>$mapping['semester'],'section'=>$mapping['section'],'batch_label'=>$batchLabel,'exam_date'=>'2026-09-15','category'=>'regular','display_label'=>'Test']);
     $service=new App\Exams\ExamCycleDeletionService($pdo);$preview=$service->preview($cycle);$fingerprint=$service::fingerprint($preview);
     assert($preview['counts']['Papers']===1);
     foreach([['wrong name',$fingerprint],['Delete cycle test','stale']] as [$name,$hash]){

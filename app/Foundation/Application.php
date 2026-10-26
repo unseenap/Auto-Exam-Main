@@ -116,6 +116,13 @@ final class Application
         $required=$this->requiredPermission($path);
         if($required!==null&&!$this->auth->can($required))return Response::html(View::render('errors/403'),403);
 
+        // The scheduled task is the primary trigger; signed-in traffic catches
+        // up after downtime. Academic administration retains a preview path.
+        if(str_starts_with($path,'/academic-rollover'))return (new \App\Academic\AcademicRolloverController($this->database->connection()))->handle($request,$path);
+        try{(new \App\Academic\AcademicRollover($this->database->connection()))->run(date('Y-m-d'),null,'request');}
+        catch(Throwable $e){error_log('Academic rollover failed: '.$e->getMessage());return Response::html('<h1>Academic progression needs attention</h1><p>No partial rollover was saved. Please ask an academic administrator to review Academic progression.</p>',503);}
+        if($method==='POST'&&(str_starts_with($path,'/courses')||str_starts_with($path,'/masters')))(new \App\Academic\AcademicRollover($this->database->connection()))->invalidate();
+
         if ($path === '/students' && $method === 'POST') return $this->saveStudent($request);
         if ($path === '/students/import/template.csv' && $method === 'GET') return $this->studentImportTemplate();
         if ($path === '/students/import' && $method === 'POST') return $this->stageStudentImport($request);
@@ -185,6 +192,7 @@ final class Application
         if(preg_match('#^/seating/(\d+)/publish$#',$path,$matches)===1&&$method==='POST')return $this->publishSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/move$#',$path,$matches)===1&&$method==='POST')return $this->moveSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/assign-unallocated$#',$path,$matches)===1&&$method==='POST')return $this->assignUnallocated($request,(int)$matches[1]);
+        if(preg_match('#^/seating/(\d+)/export.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->seatingPlanXlsx((int)$matches[1]);
         if(preg_match('#^/seating/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('seating/preview',$this->seatingPreviewData((int)$matches[1])));
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('attendance/sheet',$this->attendanceSheetData((int)$matches[1])));
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->saveAttendance($request,(int)$matches[1]);
@@ -223,7 +231,7 @@ final class Application
             '/faculty/import' => Response::html(View::render('faculty/import')),
             '/rooms' => Response::html(View::render('rooms/index',$this->roomData($request))),
             '/rooms/create' => Response::html(View::render('rooms/form',$this->roomFormData())),
-            '/rooms/import' => Response::html(View::render('rooms/import')),
+            '/rooms/import' => Response::html(View::render('rooms/import',['schools'=>$this->database->connection()->query("SELECT id,code,name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC)])),
             '/exam-cycles' => Response::html(View::render('exams/cycles',$this->examCycleData())),
             '/exam-cycles/create' => Response::html(View::render('exams/cycle-form',$this->examCycleFormData())),
             '/courses' => Response::html(View::render('exams/courses',$this->courseData())),
@@ -243,6 +251,7 @@ final class Application
 
     private function requiredPermission(string $path):?string
     {
+        if(str_starts_with($path,'/academic-rollover'))return 'academic.manage';
         if($path==='/dashboard')return 'dashboard.view';
         if(str_starts_with($path,'/users'))return 'users.manage';
         if(str_starts_with($path,'/audit-logs'))return 'audit.view';
@@ -305,14 +314,15 @@ final class Application
     private function studentData(Request $request): array
     {
         $search = trim((string) $request->input('search', ''));
-        $programmeId = (int) $request->input('programme_id', 0) ?: null;
-        $batchId = (int) $request->input('batch_id', 0) ?: null;
         $page = max(1, (int) $request->input('page', 1));
-        $repository = new StudentRepository($this->database->connection());
-        $result = $repository->paginate($search, $programmeId, $batchId, $page);
+        $pdo=$this->database->connection();
+        $schools=$pdo->query('SELECT id,code,name FROM schools ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
         $programmes = $this->programmeOptions();
         $batches=$this->batchOptions();
-        return compact('result', 'search', 'programmeId', 'batchId', 'programmes','batches')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $filters=\App\Academic\StudentDirectoryFilters::resolve(['school_id'=>$request->input('school_id',0),'programme_id'=>$request->input('programme_id',0),'batch_id'=>$request->input('batch_id',0)],$schools,$programmes,$batches);
+        $schoolId=$filters['schoolId'];$programmeId=$filters['programmeId'];$batchId=$filters['batchId'];
+        $result=(new StudentRepository($pdo))->paginate($search,$programmeId,$batchId,$page,25,$schoolId);
+        return compact('result', 'search', 'schoolId','programmeId', 'batchId', 'schools','programmes','batches')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function studentFormData(?int $id = null): array
@@ -375,6 +385,7 @@ final class Application
                 'entity_id' => $savedId, 'old_values' => $old ? json_encode($old) : null, 'new_values' => json_encode($payload),
                 'ip' => $_SERVER['REMOTE_ADDR'] ?? null, 'agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
             $pdo->commit();
+            $this->reconcileAcademicRecords('student_save');
             $this->session->flash('success', $id ? 'Student record updated.' : 'Student record created.');
         } catch (\PDOException $exception) {
             if ($pdo->inTransaction()) $pdo->rollBack();
@@ -384,6 +395,14 @@ final class Application
             return Response::redirect($id ? url("students/{$id}/edit") : url('students/create'));
         }
         return Response::redirect(url('students'));
+    }
+
+    private function reconcileAcademicRecords(string $source):void
+    {
+        try{
+            $service=new \App\Academic\AcademicRollover($this->database->connection());$service->invalidate();
+            $service->run(date('Y-m-d'),(int)$this->auth->user()['id'],$source,true);
+        }catch(Throwable $e){error_log('Academic reconciliation failed: '.$e->getMessage());$this->session->flash('error','Records were saved, but academic progression needs review. Open Academic progression before scheduling examinations.');}
     }
 
     private function programmeOptions(): array
@@ -447,6 +466,7 @@ final class Application
             $pdo->beginTransaction();
             $result = (new StudentImportService($pdo))->commit($id, (int) $this->auth->user()['id']);
             $pdo->commit();
+            $this->reconcileAcademicRecords('student_import');
             $this->session->flash('success', $result['created'] . ' student records imported.');
             return Response::redirect(url('students'));
         } catch (\Throwable $exception) {
@@ -515,15 +535,16 @@ final class Application
 
     private function roomData(Request $request): array
     {
-        return ['rooms'=>$this->database->connection()->query("SELECT r.*,SUM(CASE WHEN rs.is_blocked=1 THEN 1 ELSE 0 END) AS blocked_seats
-            FROM rooms r LEFT JOIN room_seats rs ON rs.room_id=r.id GROUP BY r.id ORDER BY r.priority,r.code")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $pdo=$this->database->connection();$schoolId=(int)$request->input('school_id',0);
+        $q=$pdo->prepare("SELECT r.*,sc.code AS school_code,sc.name AS school_name,(SELECT COUNT(*) FROM room_seats rs WHERE rs.room_id=r.id AND rs.is_blocked=1) AS blocked_seats FROM rooms r LEFT JOIN schools sc ON sc.id=r.school_id WHERE (?=0 OR r.school_id=?) ORDER BY sc.code,r.priority,r.code");$q->execute([$schoolId,$schoolId]);
+        return ['rooms'=>$q->fetchAll(PDO::FETCH_ASSOC),'schoolId'=>$schoolId,'schools'=>$pdo->query('SELECT id,code,name FROM schools ORDER BY name')->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function roomFormData(?int $id=null): array
     {
         $room=null;$blocked='';if($id){$q=$this->database->connection()->prepare('SELECT * FROM rooms WHERE id=:id');$q->execute(['id'=>$id]);$room=$q->fetch(PDO::FETCH_ASSOC);
             $q=$this->database->connection()->prepare("SELECT CONCAT(row_no,'-',column_no) FROM room_seats WHERE room_id=:id AND is_blocked=1");$q->execute(['id'=>$id]);$blocked=implode(',',$q->fetchAll(PDO::FETCH_COLUMN));}
-        return ['room'=>$room,'blocked'=>$blocked,'errors'=>$this->session->pullFlash('errors',[]),'old'=>$this->session->pullFlash('old',[])];
+        return ['schools'=>$this->database->connection()->query("SELECT id,code,name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC),'room'=>$room,'blocked'=>$blocked,'errors'=>$this->session->pullFlash('errors',[]),'old'=>$this->session->pullFlash('old',[])];
     }
 
     private function stageRoomImport(Request $request): Response
@@ -535,16 +556,16 @@ final class Application
         if(!in_array($extension,['csv','xlsx'],true)||(int)$file['size']>10*1024*1024){$this->session->flash('error','Upload a CSV or XLSX file smaller than 10 MB.');return Response::redirect(url('rooms/import'));}
         $stored=sprintf('rooms_%s_%s.%s',date('Ymd_His'),bin2hex(random_bytes(6)),$extension);$destination=BASE_PATH.'/storage/imports/'.$stored;
         if(!move_uploaded_file($file['tmp_name'],$destination)){$destination=(string)$file['tmp_name'];}
-        try{$id=(new RoomImportService($this->database->connection()))->stage($destination,$file['name'],(int)$this->auth->user()['id']);return Response::redirect(url("rooms/import/{$id}"));}
+        try{$id=(new RoomImportService($this->database->connection()))->stage($destination,$file['name'],(int)$this->auth->user()['id'],(int)$request->input('school_id',0));return Response::redirect(url("rooms/import/{$id}"));}
         catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url('rooms/import'));}
     }
 
     private function roomImportTemplate(): Response
     {
         $rows=[
-            ['Room Code','Building','Floor','Rows','Columns','Seat Order','Disabled Seat Numbers','Priority','Status','Notes'],
-            ['ICT-101','ICT Block','First Floor','6','8','column_major','R02-C04 | R03-C04','10','active','Standard examination room'],
-            ['SOE-201','Engineering Block','Second Floor','5','10','row_major','R01-C01 | R05-C10','20','active','Corner seats disabled'],
+            ['Room Code','School Code','Building','Floor','Rows','Columns','Seat Order','Disabled Seat Numbers','Priority','Status','Notes'],
+            ['ICT-101','ICT','ICT Block','First Floor','6','8','column_major','R02-C04 | R03-C04','10','active','Standard examination room'],
+            ['ICT-102','ICT','ICT Block','Second Floor','5','10','row_major','R01-C01 | R05-C10','20','active','Corner seats disabled'],
         ];
         $content=implode("\r\n",array_map(static fn(array $row):string=>implode(',',array_map(static function(string $value):string{return strpbrk($value,",\"\r\n")!==false?'"'.str_replace('"','""',$value).'"':$value;},$row)),$rows))."\r\n";
         return Response::csv($content,'gbu-room-import-template.csv');
@@ -566,21 +587,28 @@ final class Application
     private function saveRoom(Request $request,?int $id=null): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('rooms'));
-        $data=['code'=>trim((string)$request->input('code')),'building'=>trim((string)$request->input('building')),'floor'=>trim((string)$request->input('floor'))?:null,
+        $data=['school_id'=>(int)$request->input('school_id',0),'code'=>trim((string)$request->input('code')),'building'=>trim((string)$request->input('building')),'floor'=>trim((string)$request->input('floor'))?:null,
             'rows_count'=>(int)$request->input('rows_count'),'columns_count'=>(int)$request->input('columns_count'),'physical_capacity'=>1,'usable_capacity'=>1,
             'seat_order'=>(string)$request->input('seat_order','column_major'),'priority'=>(int)$request->input('priority',100),'status'=>(string)$request->input('status','active'),'notes'=>trim((string)$request->input('notes'))?:null];
-        $errors=[];if($data['code']==='')$errors['code']='Room code is required.';if($data['building']==='')$errors['building']='Building is required.';if($data['rows_count']<1||$data['rows_count']>100)$errors['rows_count']='Rows must be between 1 and 100.';if($data['columns_count']<1||$data['columns_count']>100)$errors['columns_count']='Columns must be between 1 and 100.';
+        $errors=[];try{(new \App\Rooms\SchoolRoomPolicy($this->database->connection()))->assertSchool($data['school_id']);}catch(\RuntimeException $e){$errors['school_id']=$e->getMessage();}if($data['code']==='')$errors['code']='Room code is required.';if($data['building']==='')$errors['building']='Building is required.';if($data['rows_count']<1||$data['rows_count']>100)$errors['rows_count']='Rows must be between 1 and 100.';if($data['columns_count']<1||$data['columns_count']>100)$errors['columns_count']='Columns must be between 1 and 100.';
         if($errors){$this->session->flash('errors',$errors);$this->session->flash('old',array_merge($data,['blocked'=>$request->input('blocked')]));return Response::redirect($id?url("rooms/{$id}/edit"):url('rooms/create'));}
         $blocked=array_values(array_filter(array_map('trim',explode(',',(string)$request->input('blocked','')))));$pdo=$this->database->connection();try{$pdo->beginTransaction();
-            if($id){$sets=implode(',',array_map(fn($k)=>"{$k}=:{$k}",array_keys($data)));$data['id']=$id;$pdo->prepare("UPDATE rooms SET {$sets} WHERE id=:id")->execute($data);$roomId=$id;}
+            $rebuild=true;
+            if($id){
+                $q=$pdo->prepare('SELECT rows_count,columns_count,seat_order,physical_capacity,usable_capacity FROM rooms WHERE id=? FOR UPDATE');$q->execute([$id]);$previous=$q->fetch(PDO::FETCH_ASSOC);if(!$previous)throw new \RuntimeException('Room not found.');
+                $q=$pdo->prepare("SELECT CONCAT(row_no,'-',column_no) FROM room_seats WHERE room_id=? AND is_blocked=1");$q->execute([$id]);$oldBlocked=$q->fetchAll(PDO::FETCH_COLUMN);$newBlocked=$blocked;sort($oldBlocked);sort($newBlocked);
+                $rebuild=(int)$previous['rows_count']!==$data['rows_count']||(int)$previous['columns_count']!==$data['columns_count']||$previous['seat_order']!==$data['seat_order']||$oldBlocked!==$newBlocked;
+                if(!$rebuild){$data['physical_capacity']=(int)$previous['physical_capacity'];$data['usable_capacity']=(int)$previous['usable_capacity'];}
+            }
+            if($id){(new \App\Rooms\SchoolRoomPolicy($pdo))->assertOwnershipChange($id,$data['school_id']);$sets=implode(',',array_map(fn($k)=>"{$k}=:{$k}",array_keys($data)));$data['id']=$id;$pdo->prepare("UPDATE rooms SET {$sets} WHERE id=:id")->execute($data);$roomId=$id;}
             else{$keys=array_keys($data);$pdo->prepare('INSERT INTO rooms('.implode(',',$keys).') VALUES('.implode(',',array_map(fn($k)=>":{$k}",$keys)).')')->execute($data);$roomId=(int)$pdo->lastInsertId();}
-            (new RoomSeatGenerator($pdo))->regenerate($roomId,$data['rows_count'],$data['columns_count'],$data['seat_order'],$blocked);$this->audit($pdo,$id?'room.updated':'room.created','room',$roomId,$data);$pdo->commit();$this->session->flash('success',$id?'Room layout updated.':'Room and seat map created.');return Response::redirect(url('rooms'));
-        }catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('errors',['code'=>'Room code must be unique and blocked coordinates must be valid.']);$this->session->flash('old',$data);return Response::redirect($id?url("rooms/{$id}/edit"):url('rooms/create'));}
+            if($rebuild)(new RoomSeatGenerator($pdo))->regenerate($roomId,$data['rows_count'],$data['columns_count'],$data['seat_order'],$blocked);$this->audit($pdo,$id?'room.updated':'room.created','room',$roomId,$data);$pdo->commit();$this->session->flash('success',$id?'Room layout updated.':'Room and seat map created.');return Response::redirect(url('rooms'));
+        }catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('errors',['code'=>$e instanceof \RuntimeException?$e->getMessage():'Room code must be unique. Room layouts already used for seating cannot be rebuilt.']);$this->session->flash('old',$data);return Response::redirect($id?url("rooms/{$id}/edit"):url('rooms/create'));}
     }
 
     private function roomLayoutData(int $id): array
     {
-        $q=$this->database->connection()->prepare('SELECT * FROM rooms WHERE id=:id');$q->execute(['id'=>$id]);$room=$q->fetch(PDO::FETCH_ASSOC);if(!$room)throw new \RuntimeException('Room not found.');
+        $q=$this->database->connection()->prepare('SELECT r.*,sc.code AS school_code FROM rooms r LEFT JOIN schools sc ON sc.id=r.school_id WHERE r.id=:id');$q->execute(['id'=>$id]);$room=$q->fetch(PDO::FETCH_ASSOC);if(!$room)throw new \RuntimeException('Room not found.');
         $q=$this->database->connection()->prepare('SELECT * FROM room_seats WHERE room_id=:id ORDER BY row_no,column_no');$q->execute(['id'=>$id]);return ['room'=>$room,'seats'=>$q->fetchAll(PDO::FETCH_ASSOC)];
     }
 
@@ -603,7 +631,7 @@ final class Application
     }
 
     private function examCycleFormData(): array
-    {return ['batches'=>$this->batchOptions()];}
+    {$calendar=(new \App\Academic\AcademicRollover($this->database->connection()))->calendar();return ['batches'=>$this->batchOptions(),'academicSession'=>$calendar->period(date('Y-m-d'))['academic_session'],'sessionStart'=>$calendar->sessionStart];}
 
     private function deleteExamCycle(Request $request,int $id,string $method,string $action): Response
     {
@@ -642,7 +670,15 @@ final class Application
         $invalid=$data['name']===''||$data['academic_year']===''||$data['start_date']===''||$data['end_date']===''||$data['start_date']>$data['end_date']||$duration<30||$duration>300||!$data['batch_ids'];
         foreach($data['shifts'] as $shift)if(trim($shift['name'])===''||$shift['start']===''||$shift['end']===''||$shift['start']>=$shift['end'])$invalid=true;
         if($invalid){$this->session->flash('error','Review the cycle details, select at least one student batch, and confirm the shift times.');$this->session->flash('cycle_old',$_POST);return Response::redirect(url('exam-cycles/create'));}
-        try{$id=(new ExamService($this->database->connection()))->createCycle($data,(int)$this->auth->user()['id']);$this->session->flash('success','Examination cycle created with calendar and shifts.');return Response::redirect(url("date-sheets/{$id}"));}
+        try{
+            if(BatchProgression::usesCurrentSemester($data)){
+                $period=(new \App\Academic\AcademicRollover($this->database->connection()))->calendar()->period($data['start_date']);
+                preg_match('/^(\d{4})-(\d{2}|\d{4})$/',$data['academic_year'],$m);
+                $end=isset($m[2])?(strlen($m[2])===2?(int)substr($m[1],0,2)*100+(int)$m[2]:(int)$m[2]):0;
+                if(!$m||(int)$m[1]!==$period['session_start_year']||$end!==(int)$m[1]+1)throw new \RuntimeException('Academic year must match '.$period['academic_session'].' for the selected start date.');
+                $data['academic_year']=$period['academic_session'];
+            }
+            $id=(new ExamService($this->database->connection()))->createCycle($data,(int)$this->auth->user()['id']);$this->session->flash('success','Examination cycle created with calendar and shifts.');return Response::redirect(url("date-sheets/{$id}"));}
         catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url('exam-cycles/create'));}
     }
 
@@ -774,7 +810,7 @@ final class Application
     {
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT * FROM exam_cycles WHERE id=:id');$q->execute(['id'=>$cycleId]);$cycle=$q->fetch(PDO::FETCH_ASSOC);if(!$cycle)throw new \RuntimeException('Exam cycle not found.');
         $schools=$pdo->query("SELECT id,code,name,short_name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-        $cycleBatchQuery=$pdo->prepare("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year,p.duration_semesters FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year,b.label");$cycleBatchQuery->execute(['cycle'=>$cycleId]);$cycleBatches=$cycleBatchQuery->fetchAll(PDO::FETCH_ASSOC);$regularSemesterScope=[];$currentSemesterMode=BatchProgression::usesCurrentSemester($cycle);if($currentSemesterMode){foreach($cycleBatches as &$cycleBatch){$progress=BatchProgression::calculate($cycle,$cycleBatch,(int)$cycleBatch['duration_semesters']);$cycleBatch['study_year']=$progress['study_year'];$cycleBatch['current_semester']=$progress['semester'];$cycleBatch['is_current']=$progress['active'];}unset($cycleBatch);$cycleBatches=array_values(array_filter($cycleBatches,static fn(array $batch):bool=>!empty($batch['is_current'])));$regularSemesterScope=array_values(array_unique(array_map('intval',array_column($cycleBatches,'current_semester'))));sort($regularSemesterScope);}$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatches,'programme_id'))));
+        $cycleBatchQuery=$pdo->prepare("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year,p.duration_semesters FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year,b.label");$cycleBatchQuery->execute(['cycle'=>$cycleId]);$cycleBatches=$cycleBatchQuery->fetchAll(PDO::FETCH_ASSOC);$regularSemesterScope=[];$currentSemesterMode=BatchProgression::usesCurrentSemester($cycle);if($currentSemesterMode){foreach($cycleBatches as &$cycleBatch){$progress=BatchProgression::calculate($cycle,$cycleBatch,(int)$cycleBatch['duration_semesters'],(new \App\Academic\AcademicRollover($pdo))->calendar());$cycleBatch['study_year']=$progress['study_year'];$cycleBatch['current_semester']=$progress['semester'];$cycleBatch['is_current']=$progress['active'];}unset($cycleBatch);$cycleBatches=array_values(array_filter($cycleBatches,static fn(array $batch):bool=>!empty($batch['is_current'])));$regularSemesterScope=array_values(array_unique(array_map('intval',array_column($cycleBatches,'current_semester'))));sort($regularSemesterScope);}$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatches,'programme_id'))));
         $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);if($currentSemesterMode||$cycleProgrammeIds)$programmes=array_values(array_filter($programmes,static fn(array $p):bool=>in_array((int)$p['id'],$cycleProgrammeIds,true)));
         $curriculumQuery=$pdo->prepare("SELECT pc.id,pc.programme_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE c.status='active' AND p.status='active' AND (pc.batch_id IN (SELECT batch_id FROM exam_cycle_batches WHERE cycle_id=:cycle) OR pc.batch_id IS NULL) ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code");$curriculumQuery->execute(['cycle'=>$cycleId]);$curriculum=$curriculumQuery->fetchAll(PDO::FETCH_ASSOC);
         if($currentSemesterMode){$batchScope=[];$programmeSemesters=[];foreach($cycleBatches as $batch){$batchScope[(int)$batch['id']]=(int)$batch['current_semester'];$programmeSemesters[(int)$batch['programme_id']][(int)$batch['current_semester']]=true;}$curriculum=array_values(array_filter($curriculum,static function(array $item)use($batchScope,$programmeSemesters):bool{return $item['batch_id']?(($batchScope[(int)$item['batch_id']]??0)===(int)$item['semester']):isset($programmeSemesters[(int)$item['programme_id']][(int)$item['semester']]);}));}$curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
@@ -912,34 +948,53 @@ final class Application
         $pdo=$this->database->connection();$cycleId=(int)$request->input('cycle_id',0);
         $cycles=$pdo->query("SELECT id,name FROM exam_cycles WHERE status IN ('draft','published') ORDER BY start_date DESC")->fetchAll(PDO::FETCH_ASSOC);
         $sessions=[];if($cycleId){$q=$pdo->prepare("SELECT DISTINCT e.exam_date,es.id AS shift_id,es.name AS shift_name,es.start_time,es.end_time,
-            (SELECT COUNT(DISTINCT ee.student_id) FROM examinations e2 JOIN exam_eligibility ee ON ee.examination_id=e2.id AND ee.eligibility_status='eligible' WHERE e2.cycle_id=e.cycle_id AND e2.exam_date=e.exam_date AND e2.shift_id=e.shift_id) AS eligible_count
-            FROM examinations e JOIN exam_shifts es ON es.id=e.shift_id WHERE e.cycle_id=:cycle ORDER BY e.exam_date,es.sequence_no");$q->execute(['cycle'=>$cycleId]);$sessions=$q->fetchAll(PDO::FETCH_ASSOC);}
-        return ['cycles'=>$cycles,'sessions'=>$sessions,'rooms'=>$pdo->query("SELECT id,code,building,usable_capacity FROM rooms WHERE status='active' ORDER BY priority,code")->fetchAll(PDO::FETCH_ASSOC),'cycleId'=>$cycleId,'error'=>$this->session->pullFlash('error')];
+            (SELECT COUNT(DISTINCT ee.student_id) FROM examinations e2 JOIN exam_eligibility ee ON ee.examination_id=e2.id AND ee.eligibility_status='eligible' WHERE e2.cycle_id=e.cycle_id AND e2.exam_date=e.exam_date AND e2.shift_id=e.shift_id AND e2.status<>'cancelled') AS eligible_count
+            FROM examinations e JOIN exam_shifts es ON es.id=e.shift_id WHERE e.cycle_id=:cycle AND e.status<>'cancelled' ORDER BY e.exam_date,es.sequence_no");$q->execute(['cycle'=>$cycleId]);$sessions=$q->fetchAll(PDO::FETCH_ASSOC);}
+        $demands=[];$sessionGroups=[];
+        if($cycleId){$roster=(new \App\Seating\SeatingRoster($pdo))->eligible($cycleId);$bySession=[];foreach($roster as $row)$bySession[$row['exam_date'].'|'.$row['shift_id']][]=$row;
+            foreach($bySession as $key=>$rows){$sessionGroups[$key]=array_values(\App\Seating\SeatingRoster::groups($rows));foreach($sessionGroups[$key] as $group){$sc=$group['school_id'];if(!isset($demands[$key][$sc]))$demands[$key][$sc]=['id'=>$sc,'code'=>$group['school_code'],'demand'=>0];$demands[$key][$sc]['demand']+=$group['count'];}}
+        }
+        foreach($sessions as &$session)$session['school_demands']=array_values($demands[$session['exam_date'].'|'.$session['shift_id']]??[]);unset($session);
+        $roomOptions=$pdo->query("SELECT r.id,r.code,r.building,r.usable_capacity,r.school_id,sc.code AS school_code FROM rooms r JOIN schools sc ON sc.id=r.school_id WHERE r.status='active' AND sc.status='active' ORDER BY sc.code,r.priority,r.code")->fetchAll(PDO::FETCH_ASSOC);
+        $seatOptions=[];$counts=[];foreach($pdo->query("SELECT rs.room_id,rs.row_no,rs.column_no,r.usable_capacity FROM room_seats rs JOIN rooms r ON r.id=rs.room_id JOIN schools sc ON sc.id=r.school_id WHERE r.status='active' AND sc.status='active' AND rs.is_blocked=0 ORDER BY r.priority,r.code,rs.sequence_no") as $seat){$room=(int)$seat['room_id'];if(($counts[$room]??0)>=(int)$seat['usable_capacity'])continue;$seatOptions[$room][]=[(int)$seat['row_no'],(int)$seat['column_no']];$counts[$room]=($counts[$room]??0)+1;}
+        return ['cycles'=>$cycles,'sessions'=>$sessions,'rooms'=>$roomOptions,'sessionGroups'=>$sessionGroups,'seatOptions'=>$seatOptions,'cycleId'=>$cycleId,'oldSeating'=>$this->session->pullFlash('old_seating',[]),'error'=>$this->session->pullFlash('error')];
     }
 
     private function generateSeating(Request $request): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('seating'));
-        $roomIds=array_map('intval',(array)($_POST['room_ids']??[]));$cycleId=(int)$request->input('cycle_id');$date=(string)$request->input('exam_date');$shiftId=(int)$request->input('shift_id');
-        try{$result=(new SeatingAllocator($this->database->connection()))->generate($cycleId,$date,$shiftId,$roomIds,(int)$this->auth->user()['id'],hash('sha256',$cycleId.$date.$shiftId.implode(',',$roomIds)));
-            $this->session->flash('success',"{$result['assigned']} students assigned. {$result['unallocated']} unallocated.");return Response::redirect(url('seating/'.$result['allocation_id']));}
-        catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url('seating/generate?cycle_id='.$cycleId));}
+        $cycleId=(int)$request->input('cycle_id');$date=(string)$request->input('exam_date');$shiftId=(int)$request->input('shift_id');
+        $pairings=(array)$request->input('pairings',[]);$roomIds=[];foreach($pairings as $pair)if(is_array($pair))foreach((array)($pair['room_ids']??[]) as $room)$roomIds[]=(int)$room;$roomIds=array_values(array_unique($roomIds));
+        try{$result=(new SeatingAllocator($this->database->connection()))->generate($cycleId,$date,$shiftId,$roomIds,(int)$this->auth->user()['id'],hash('sha256',json_encode([$cycleId,$date,$shiftId,$pairings])),['mode'=>'paired_cohorts','pairings'=>$pairings]);
+            $this->session->flash('success',"{$result['assigned']} students assigned. {$result['unallocated']} unallocated. Each room follows its saved branch/batch pairing.");return Response::redirect(url('seating/'.$result['allocation_id']));}
+        catch(\Throwable $e){$this->session->flash('old_seating',['session'=>$date.'|'.$shiftId,'pairings'=>$pairings]);$this->session->flash('error',$e->getMessage());return Response::redirect(url('seating/generate?cycle_id='.$cycleId));}
+    }
+
+    private function seatingPlanXlsx(int $id): Response
+    {
+        $document=(new \App\Seating\SeatingPlanDocument($this->database->connection()))->build($id);
+        $bytes=(new \App\Export\SeatingPlanXlsx())->build($document);
+        return Response::xlsx($bytes,'seating-plan-'.$document['allocation']['exam_date'].'-v'.$document['allocation']['version_no'].'.xlsx');
     }
 
     private function seatingPreviewData(int $id): array
     {
         $pdo=$this->database->connection();$q=$pdo->prepare("SELECT sa.*,ec.name AS cycle_name,es.name AS shift_name,es.start_time,es.end_time FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id WHERE sa.id=:id");$q->execute(['id'=>$id]);$allocation=$q->fetch(PDO::FETCH_ASSOC);if(!$allocation)throw new \RuntimeException('Allocation not found.');
-        $q=$pdo->prepare("SELECT a.*,r.code AS room_code,r.building,rs.seat_label,rs.row_no,rs.column_no,rs.desk_group,s.roll_no_original,s.name AS student_name,p.code AS programme_code,c.code AS course_code,c.name AS course_name
+        $q=$pdo->prepare("SELECT a.*,r.code AS room_code,r.building,(SELECT code FROM schools WHERE id=r.school_id) AS room_school_code,rs.seat_label,rs.row_no,rs.column_no,rs.desk_group,s.roll_no_original,s.name AS student_name,p.school_id,p.code AS programme_code,c.code AS course_code,c.name AS course_name
             FROM seating_assignments a JOIN rooms r ON r.id=a.room_id JOIN room_seats rs ON rs.id=a.seat_id JOIN students s ON s.id=a.student_id JOIN programmes p ON p.id=s.programme_id JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id WHERE a.allocation_id=:id ORDER BY r.priority,r.code,rs.row_no,rs.column_no");$q->execute(['id'=>$id]);$assignments=$q->fetchAll(PDO::FETCH_ASSOC);$byRoom=[];foreach($assignments as $item)$byRoom[$item['room_code']][]=$item;
-        $q=$pdo->prepare("SELECT su.*,s.roll_no_original,s.name,p.code AS programme_code,c.code AS course_code FROM seating_unallocated su JOIN students s ON s.id=su.student_id JOIN programmes p ON p.id=s.programme_id JOIN examinations e ON e.id=su.examination_id JOIN courses c ON c.id=e.course_id WHERE su.allocation_id=:id AND su.resolved_at IS NULL ORDER BY s.normalized_roll_no");$q->execute(['id'=>$id]);$unallocated=$q->fetchAll(PDO::FETCH_ASSOC);
-        $q=$pdo->prepare("SELECT rs.id,r.code AS room_code,rs.seat_label FROM room_seats rs JOIN rooms r ON r.id=rs.room_id LEFT JOIN seating_assignments sa ON sa.allocation_id=:id AND sa.seat_id=rs.id WHERE rs.is_blocked=0 AND r.status='active' AND sa.id IS NULL ORDER BY r.priority,r.code,rs.sequence_no");$q->execute(['id'=>$id]);$availableSeats=$q->fetchAll(PDO::FETCH_ASSOC);
-        $validation=(new SeatingAllocator($pdo))->validate($id);return compact('allocation','assignments','byRoom','validation','unallocated','availableSeats')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $q=$pdo->prepare("SELECT su.*,s.roll_no_original,s.name,p.school_id,p.code AS programme_code,c.code AS course_code FROM seating_unallocated su JOIN students s ON s.id=su.student_id JOIN programmes p ON p.id=s.programme_id JOIN examinations e ON e.id=su.examination_id JOIN courses c ON c.id=e.course_id WHERE su.allocation_id=:id AND su.resolved_at IS NULL ORDER BY s.normalized_roll_no");$q->execute(['id'=>$id]);$unallocated=$q->fetchAll(PDO::FETCH_ASSOC);
+        $q=$pdo->prepare("SELECT rs.id,r.code AS room_code,rs.seat_label,r.school_id,rs.room_id,rs.column_no FROM room_seats rs JOIN rooms r ON r.id=rs.room_id LEFT JOIN seating_assignments sa ON sa.allocation_id=:id AND sa.seat_id=rs.id WHERE rs.is_blocked=0 AND r.status='active' AND r.school_id IS NOT NULL AND sa.id IS NULL ORDER BY r.priority,r.code,rs.sequence_no");$q->execute(['id'=>$id]);$availableSeats=$q->fetchAll(PDO::FETCH_ASSOC);
+        $document=(new \App\Seating\SeatingPlanDocument($pdo))->build($id);$rules=$document['rules'];$roomPairs=[];foreach($rules['pairings']??[] as $pair)foreach($pair['room_ids'] as $roomId)$roomPairs[$roomId]=$pair;
+        foreach($assignments as &$student)$student['group_key']=$rules['student_groups'][$student['student_id']]??'';unset($student);
+        foreach($unallocated as &$student)$student['group_key']=$rules['student_groups'][$student['student_id']]??'';unset($student);
+        foreach($availableSeats as &$seat){$pair=$roomPairs[$seat['room_id']]??null;$seat['group_key']=($rules['mode']??'')==='paired_cohorts'?($rules['room_columns'][$seat['room_id']][$seat['column_no']]??'unavailable'):'';}unset($seat);
+        $validation=(new SeatingAllocator($pdo))->validate($id);return compact('allocation','assignments','byRoom','validation','unallocated','availableSeats','document')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function moveSeating(Request $request,int $id):Response
-    { if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("seating/{$id}"));$assignment=(int)$request->input('assignment_id');$seat=(int)$request->input('seat_id');$reason=trim((string)$request->input('reason'));$pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare("SELECT sa.id,a.room_id FROM seating_assignments sa JOIN seating_allocations a ON a.id=sa.allocation_id WHERE sa.id=:assignment AND sa.allocation_id=:allocation AND a.status<>'published' FOR UPDATE");$q->execute(['assignment'=>$assignment,'allocation'=>$id]);if(!$q->fetch())throw new \RuntimeException('Only draft allocations can be corrected.');$q=$pdo->prepare('SELECT room_id FROM room_seats WHERE id=:seat AND is_blocked=0');$q->execute(['seat'=>$seat]);$room=(int)$q->fetchColumn();if(!$room)throw new \RuntimeException('Choose a usable seat.');$q=$pdo->prepare('SELECT COUNT(*) FROM seating_assignments WHERE allocation_id=:allocation AND seat_id=:seat');$q->execute(['allocation'=>$id,'seat'=>$seat]);if((int)$q->fetchColumn())throw new \RuntimeException('That seat is already occupied.');$pdo->prepare('UPDATE seating_assignments SET room_id=:room,seat_id=:seat,is_manual_override=1,override_reason=:reason WHERE id=:id')->execute(['room'=>$room,'seat'=>$seat,'reason'=>$reason?:'Manual correction','id'=>$assignment]);$this->audit($pdo,'seating.assignment_moved','seating_allocation',$id,['assignment_id'=>$assignment,'seat_id'=>$seat,'reason'=>$reason]);$pdo->commit();$this->session->flash('success','Seat assignment corrected.');}catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url("seating/{$id}")); }
+    { if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("seating/{$id}"));$assignment=(int)$request->input('assignment_id');$seat=(int)$request->input('seat_id');$reason=trim((string)$request->input('reason'));$pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare("SELECT sa.id,sa.student_id,sa.room_id FROM seating_assignments sa JOIN seating_allocations a ON a.id=sa.allocation_id WHERE sa.id=:assignment AND sa.allocation_id=:allocation AND a.status='draft' FOR UPDATE");$q->execute(['assignment'=>$assignment,'allocation'=>$id]);$assignmentRow=$q->fetch(PDO::FETCH_ASSOC);if(!$assignmentRow)throw new \RuntimeException('Only draft allocations can be corrected.');$q=$pdo->prepare('SELECT room_id FROM room_seats WHERE id=:seat AND is_blocked=0');$q->execute(['seat'=>$seat]);$room=(int)$q->fetchColumn();if(!$room)throw new \RuntimeException('Choose a usable seat.');(new \App\Rooms\SchoolRoomPolicy($pdo))->assertStudentRoom((int)$assignmentRow['student_id'],$room);(new SeatingAllocator($pdo))->assertPairingSeat($id,(int)$assignmentRow['student_id'],$seat);$q=$pdo->prepare('SELECT COUNT(*) FROM seating_assignments WHERE allocation_id=:allocation AND seat_id=:seat');$q->execute(['allocation'=>$id,'seat'=>$seat]);if((int)$q->fetchColumn())throw new \RuntimeException('That seat is already occupied.');$pdo->prepare('UPDATE seating_assignments SET room_id=:room,seat_id=:seat,is_manual_override=1,override_reason=:reason WHERE id=:id')->execute(['room'=>$room,'seat'=>$seat,'reason'=>$reason?:'Manual correction','id'=>$assignment]);$this->audit($pdo,'seating.assignment_moved','seating_allocation',$id,['assignment_id'=>$assignment,'seat_id'=>$seat,'reason'=>$reason]);$pdo->commit();$this->session->flash('success','Seat assignment corrected.');}catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url("seating/{$id}")); }
     private function assignUnallocated(Request $request,int $id):Response
-    { if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("seating/{$id}"));$pending=(int)$request->input('unallocated_id');$seat=(int)$request->input('seat_id');$pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare("SELECT su.*,a.status FROM seating_unallocated su JOIN seating_allocations a ON a.id=su.allocation_id WHERE su.id=:pending AND su.allocation_id=:allocation AND su.resolved_at IS NULL FOR UPDATE");$q->execute(['pending'=>$pending,'allocation'=>$id]);$row=$q->fetch(PDO::FETCH_ASSOC);if(!$row||$row['status']==='published')throw new \RuntimeException('This student cannot be assigned in the current version.');$q=$pdo->prepare('SELECT rs.room_id FROM room_seats rs JOIN rooms r ON r.id=rs.room_id WHERE rs.id=:seat AND rs.is_blocked=0 AND r.status=\'active\'');$q->execute(['seat'=>$seat]);$room=(int)$q->fetchColumn();if(!$room)throw new \RuntimeException('Choose a usable seat.');$pdo->prepare('INSERT INTO seating_assignments(allocation_id,examination_id,room_id,seat_id,student_id,is_manual_override,override_reason) VALUES(:allocation,:exam,:room,:seat,:student,1,\'Assigned from unallocated list\')')->execute(['allocation'=>$id,'exam'=>$row['examination_id'],'room'=>$room,'seat'=>$seat,'student'=>$row['student_id']]);$pdo->prepare('UPDATE seating_unallocated SET resolved_at=NOW() WHERE id=:id')->execute(['id'=>$pending]);$this->audit($pdo,'seating.unallocated_resolved','seating_allocation',$id,['student_id'=>$row['student_id'],'seat_id'=>$seat]);$pdo->commit();$this->session->flash('success','Unallocated student assigned.');}catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url("seating/{$id}")); }
+    { if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("seating/{$id}"));$pending=(int)$request->input('unallocated_id');$seat=(int)$request->input('seat_id');$pdo=$this->database->connection();try{$pdo->beginTransaction();$q=$pdo->prepare("SELECT su.*,a.status FROM seating_unallocated su JOIN seating_allocations a ON a.id=su.allocation_id WHERE su.id=:pending AND su.allocation_id=:allocation AND su.resolved_at IS NULL FOR UPDATE");$q->execute(['pending'=>$pending,'allocation'=>$id]);$row=$q->fetch(PDO::FETCH_ASSOC);if(!$row||$row['status']!=='draft')throw new \RuntimeException('This student cannot be assigned in the current version.');$q=$pdo->prepare('SELECT rs.room_id FROM room_seats rs JOIN rooms r ON r.id=rs.room_id WHERE rs.id=:seat AND rs.is_blocked=0 AND r.status=\'active\'');$q->execute(['seat'=>$seat]);$room=(int)$q->fetchColumn();if(!$room)throw new \RuntimeException('Choose a usable seat.');(new \App\Rooms\SchoolRoomPolicy($pdo))->assertStudentRoom((int)$row['student_id'],$room);(new SeatingAllocator($pdo))->assertPairingSeat($id,(int)$row['student_id'],$seat);$pdo->prepare('INSERT INTO seating_assignments(allocation_id,examination_id,room_id,seat_id,student_id,is_manual_override,override_reason) VALUES(:allocation,:exam,:room,:seat,:student,1,\'Assigned from unallocated list\')')->execute(['allocation'=>$id,'exam'=>$row['examination_id'],'room'=>$room,'seat'=>$seat,'student'=>$row['student_id']]);$pdo->prepare('UPDATE seating_unallocated SET resolved_at=NOW() WHERE id=:id')->execute(['id'=>$pending]);$this->audit($pdo,'seating.unallocated_resolved','seating_allocation',$id,['student_id'=>$row['student_id'],'seat_id'=>$seat]);$pdo->commit();$this->session->flash('success','Unallocated student assigned.');}catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url("seating/{$id}")); }
 
     private function publishSeating(Request $request,int $id): Response
     {

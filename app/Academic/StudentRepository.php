@@ -10,20 +10,23 @@ final class StudentRepository
 {
     public function __construct(private readonly PDO $pdo) {}
 
-    public function paginate(string $search = '', ?int $programmeId = null, ?int $batchId = null, int $page = 1, int $perPage = 25): array
+    public function paginate(string $search = '', ?int $programmeId = null, ?int $batchId = null, int $page = 1, int $perPage = 25, ?int $schoolId = null): array
     {
         $where = ['1=1']; $params = [];
         if ($search !== '') {
-            $where[] = '(s.roll_no_original LIKE :search OR s.enrollment_number LIKE :search OR s.normalized_roll_no LIKE :search OR s.name LIKE :search OR s.mobile_number LIKE :search)';
-            $params['search'] = '%' . $search . '%';
+            $where[] = '(s.roll_no_original LIKE :search_roll OR s.enrollment_number LIKE :search_enrollment OR s.normalized_roll_no LIKE :search_normalized OR s.name LIKE :search_name OR s.mobile_number LIKE :search_mobile)';
+            foreach (['roll','enrollment','normalized','name','mobile'] as $field) $params['search_'.$field] = '%' . $search . '%';
         }
+        if ($schoolId) { $where[] = 'EXISTS (SELECT 1 FROM programmes sp WHERE sp.id=s.programme_id AND sp.school_id=:school_id)'; $params['school_id'] = $schoolId; }
         if ($programmeId) { $where[] = 's.programme_id=:programme_id'; $params['programme_id'] = $programmeId; }
         if ($batchId) { $where[] = 's.batch_id=:batch_id'; $params['batch_id'] = $batchId; }
         $clause = implode(' AND ', $where);
         $count = $this->pdo->prepare("SELECT COUNT(*) FROM students s WHERE {$clause}");
         $count->execute($params); $total = (int) $count->fetchColumn();
-        $offset = max(0, ($page - 1) * $perPage);
-        $statement = $this->pdo->prepare("SELECT s.*,p.code AS programme_code,p.name AS programme_name,b.label AS batch_label
+        $page = max(1,min($page,max(1,(int)ceil($total/$perPage))));
+        $offset = ($page - 1) * $perPage;
+        $statement = $this->pdo->prepare("SELECT s.*,p.code AS programme_code,p.name AS programme_name,b.label AS batch_label,
+            (SELECT t.placement_status FROM student_term_enrollments t WHERE t.student_id=s.id ORDER BY t.academic_session DESC,t.term DESC LIMIT 1) AS progression_status
             FROM students s LEFT JOIN programmes p ON p.id=s.programme_id LEFT JOIN batches b ON b.id=s.batch_id
             WHERE {$clause} ORDER BY s.normalized_roll_no LIMIT {$perPage} OFFSET {$offset}");
         $statement->execute($params);

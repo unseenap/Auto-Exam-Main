@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="<?= e(url('assets/css/invigilation.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/invigilation.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/corrections.css')) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/student-profile.css')) ?>">
+  <link rel="stylesheet" href="<?= e(url('assets/css/academic-progression.css?v='.(string)filemtime(BASE_PATH.'/public/assets/css/academic-progression.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/brand.css')) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/dashboard.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/dashboard.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/exam-cycles.css')) ?>">
@@ -53,6 +54,7 @@
       <?php if($can('audit.view')):?><a aria-label="Audit logs" data-nav-short="AL" class="<?= str_contains($path, '/audit-logs') ? 'active' : '' ?>" href="<?= e(url('audit-logs')) ?>">Audit logs</a><?php endif;?>
       <?php if($can('academic.manage')||$can('students.manage')||$can('faculty.manage')||$can('rooms.manage')):?><p>Academic masters</p><?php endif;?>
       <?php if($can('academic.manage')):?>
+      <a aria-label="Academic progression" data-nav-short="AP" class="<?= str_contains($path, '/academic-rollover') ? 'active' : '' ?>" href="<?= e(url('academic-rollover')) ?>">Academic progression</a>
       <a aria-label="Schools" data-nav-short="SC" class="<?= str_ends_with($path, '/masters/schools') ? 'active' : '' ?>" href="<?= e(url('masters/schools')) ?>">Schools</a>
       <a aria-label="Programmes" data-nav-short="PR" class="<?= str_ends_with($path, '/masters/programmes') ? 'active' : '' ?>" href="<?= e(url('masters/programmes')) ?>">Programmes</a>
       <a aria-label="Batches" data-nav-short="BA" class="<?= str_ends_with($path, '/masters/batches') ? 'active' : '' ?>" href="<?= e(url('masters/batches')) ?>">Batches</a>

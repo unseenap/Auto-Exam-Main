@@ -47,8 +47,8 @@ final class ExamService
         $curriculum->execute(['programme'=>$data['programme_id'],'course'=>$data['course_id'],'semester'=>$data['semester'],'section'=>$section,'batch'=>$registration['batch_id']]);
         if((int)$curriculum->fetchColumn()===0)throw new RuntimeException('The selected subject is not assigned to this batch and semester curriculum.');
         $conflict=$this->pdo->prepare("SELECT COUNT(*) FROM examinations e JOIN examination_cohorts ec ON ec.examination_id=e.id
-            WHERE e.cycle_id=:cycle AND e.exam_date=:date AND e.shift_id=:shift AND ec.programme_id=:programme AND ec.semester=:semester AND (ec.section='ALL' OR :section='ALL' OR ec.section=:section) AND ec.batch_id <=> :batch AND e.status<>'cancelled'");
-        $conflict->execute(['cycle'=>$data['cycle_id'],'date'=>$data['exam_date'],'shift'=>$data['shift_id'],'programme'=>$data['programme_id'],'semester'=>$data['semester'],'section'=>$section,'batch'=>$registration['batch_id']]);
+            WHERE e.cycle_id=:cycle AND e.exam_date=:date AND e.shift_id=:shift AND ec.programme_id=:programme AND ec.semester=:semester AND (ec.section='ALL' OR :section_all='ALL' OR ec.section=:section) AND ec.batch_id <=> :batch AND e.status<>'cancelled'");
+        $conflict->execute(['cycle'=>$data['cycle_id'],'date'=>$data['exam_date'],'shift'=>$data['shift_id'],'programme'=>$data['programme_id'],'semester'=>$data['semester'],'section_all'=>$section,'section'=>$section,'batch'=>$registration['batch_id']]);
         if((int)$conflict->fetchColumn()>0 && $registration['student_ids']===null)throw new RuntimeException('This batch and semester already has a paper in the selected date and shift.');
         $ownsTransaction=!$this->pdo->inTransaction();if($ownsTransaction)$this->pdo->beginTransaction();try{
             $shared=$this->pdo->prepare('SELECT id,status,is_locked FROM examinations WHERE cycle_id=? AND shift_id=? AND course_id=? AND exam_date=? AND category=? FOR UPDATE');
@@ -62,16 +62,17 @@ final class ExamService
             $cohort->execute([$examId,$data['programme_id'],$data['semester'],$section,$registration['batch_id']]);
             if(!$cohort->fetchColumn())$this->pdo->prepare('INSERT INTO examination_cohorts(examination_id,programme_id,batch_id,semester,section,display_label) VALUES(?,?,?,?,?,?)')->execute([$examId,$data['programme_id'],$registration['batch_id'],$data['semester'],$section,$data['display_label']??null]);
             $studentIds=$registration['student_ids'];
-            if($studentIds===null){$q=$this->pdo->prepare("SELECT id FROM students WHERE programme_id=? AND semester=? AND status='active' AND (? IS NULL OR batch_id=?) AND (?='ALL' OR section=?)");$q->execute([$data['programme_id'],$data['semester'],$registration['batch_id'],$registration['batch_id'],$section,$section]);$studentIds=$q->fetchAll(PDO::FETCH_COLUMN);}
+            if($studentIds===null)$studentIds=array_column((new \App\Academic\StudentExamPlacement($this->pdo))->cohort((int)$data['cycle_id'],(int)$data['programme_id'],$registration['batch_id'],(int)$data['semester'],$section),'id');
             $check=$this->pdo->prepare("SELECT COUNT(*) FROM exam_eligibility ee JOIN examinations e ON e.id=ee.examination_id WHERE ee.student_id=? AND ee.eligibility_status='eligible' AND e.cycle_id=? AND e.exam_date=? AND e.shift_id=? AND e.id<>? AND e.status<>'cancelled'");
             $add=$this->pdo->prepare("INSERT INTO exam_eligibility(examination_id,student_id,eligibility_status,source) VALUES(?,?,'eligible',?) ON DUPLICATE KEY UPDATE source=IF(eligibility_status IN ('pending','ineligible') AND VALUES(source)='registration',VALUES(source),source),eligibility_status=IF(eligibility_status IN ('pending','ineligible') AND VALUES(source)='registration','eligible',eligibility_status)");
             foreach($studentIds as $studentId){$check->execute([$studentId,$data['cycle_id'],$data['exam_date'],$data['shift_id'],$examId]);if((int)$check->fetchColumn())throw new RuntimeException('A selected student already has another paper in this session. Review the registration list.');$add->execute([$examId,$studentId,$registration['student_ids']===null?'cohort':'registration']);}
             if($registration['student_ids']!==null)$this->pdo->prepare("UPDATE exam_eligibility ee JOIN students s ON s.id=ee.student_id SET ee.eligibility_status='ineligible',ee.source='registration' WHERE ee.examination_id=? AND ee.eligibility_status='pending' AND s.programme_id=? AND s.semester=? AND (? IS NULL OR s.batch_id=?) AND (?='ALL' OR s.section=?)")->execute([$examId,$data['programme_id'],$data['semester'],$registration['batch_id'],$registration['batch_id'],$section,$section]);
+            (new \App\Academic\DepartmentElectiveRegistrations($this->pdo))->synchronize((int)$data['cycle_id'],$data['exam_date'],(int)$data['shift_id']);
             if($ownsTransaction)$this->pdo->commit();return $examId;
         }catch(\Throwable $e){if($ownsTransaction&&$this->pdo->inTransaction())$this->pdo->rollBack();throw $e;}
     }
 
-    /** Resolve supplied university registrations without guessing repeats or electives. */
+    /** Department electives cover the cohort; repeats retain explicit registrations. */
     public function resolveRegistrations(array $data): array
     {
         $batchId=null;$batchLabel=trim((string)($data['batch_label']??''));
@@ -79,10 +80,16 @@ final class ExamService
         $rolls=array_values(array_unique(array_filter(array_map(static fn(string $roll):string=>strtoupper(trim($roll)),preg_split('/[|;,\r\n]+/',(string)($data['roll_numbers']??''))?:[]))));
         if(!$rolls && ($data['category']??'regular')!=='regular')throw new RuntimeException('Repeat and special papers require an explicit Roll Numbers list.');
         $section=strtoupper(trim((string)($data['section']??'ALL')))?:'ALL';
-        if(!$rolls && !empty($data['course_id'])){$q=$this->pdo->prepare("SELECT COUNT(*) FROM programme_courses WHERE programme_id=? AND semester=? AND section=? AND course_id=? AND (batch_id=? OR batch_id IS NULL) AND category='elective'");$q->execute([$data['programme_id'],$data['semester'],$section,$data['course_id'],$batchId]);if((int)$q->fetchColumn())throw new RuntimeException('Elective papers require an explicit Roll Numbers list.');}
+        if(($data['category']??'regular')==='regular'){
+            $q=$this->pdo->prepare("SELECT COUNT(*) FROM programme_courses pc JOIN courses c ON c.id=pc.course_id WHERE pc.programme_id=? AND pc.semester=? AND (pc.section=? OR pc.section='ALL') AND (pc.course_id=? OR c.code=?) AND (pc.batch_id=? OR pc.batch_id IS NULL) AND pc.category='elective'");
+            $q->execute([$data['programme_id'],$data['semester'],$section,(int)($data['course_id']??0),(string)($data['course_code']??''),$batchId]);
+            if((int)$q->fetchColumn())return ['batch_id'=>$batchId,'student_ids'=>null,'department_elective'=>true];
+        }
         if(!$rolls)return ['batch_id'=>$batchId,'student_ids'=>null];
-        $q=$this->pdo->prepare("SELECT id,semester,batch_id,section FROM students WHERE programme_id=? AND normalized_roll_no=? AND status='active'");$ids=[];
-        foreach($rolls as $roll){$q->execute([$data['programme_id'],$roll]);$student=$q->fetch(PDO::FETCH_ASSOC);if(!$student||($batchId && (int)$student['batch_id']!==$batchId)||($section!=='ALL'&&strtoupper((string)$student['section'])!==$section)||(($data['category']??'regular')==='regular' && (int)$student['semester']!==(int)$data['semester']))throw new RuntimeException('Roll number '.$roll.' does not match the programme, batch, semester, section or active status.');$ids[]=(int)$student['id'];}
+        $regular=($data['category']??'regular')==='regular';
+        $allowed=$regular?array_column((new \App\Academic\StudentExamPlacement($this->pdo))->cohort((int)$data['cycle_id'],(int)$data['programme_id'],$batchId,(int)$data['semester'],$section),'id'):[];
+        $q=$this->pdo->prepare("SELECT s.id,s.semester,s.batch_id,s.section FROM students s LEFT JOIN student_progression_controls pc ON pc.student_id=s.id WHERE s.programme_id=? AND s.normalized_roll_no=? AND (pc.mode IS NULL OR pc.mode<>'withdrawn') AND (s.status IN ('active','completed') OR pc.mode='automatic')");$ids=[];
+        foreach($rolls as $roll){$q->execute([$data['programme_id'],$roll]);$student=$q->fetch(PDO::FETCH_ASSOC);if(!$student||($batchId && (int)$student['batch_id']!==$batchId)||($section!=='ALL'&&strtoupper((string)$student['section'])!==$section)||($regular&&!in_array((int)$student['id'],array_map('intval',$allowed),true)))throw new RuntimeException('Roll number '.$roll.' does not match the programme, batch, semester, section or active placement.');$ids[]=(int)$student['id'];}
         return ['batch_id'=>$batchId,'student_ids'=>$ids];
     }
 }

@@ -71,13 +71,13 @@ foreach ($rooms as $room) {
     $totalBlocked += count($blocked);
 
     $values = [
-        sqlString($code), sqlString($room['Building']), sqlString($room['Floor']), (string)$rows, (string)$columns,
+        sqlString($code), '(SELECT id FROM schools WHERE code=' . sqlString($room['School Code']) . ' LIMIT 1)', sqlString($room['Building']), sqlString($room['Floor']), (string)$rows, (string)$columns,
         (string)$physical, (string)$usable, sqlString($order), (string)((int)$room['Priority'] ?: 100),
         sqlString($status), sqlString($room['Notes'])
     ];
-    $sql .= "INSERT INTO rooms (code,building,floor,rows_count,columns_count,physical_capacity,usable_capacity,seat_order,priority,status,notes) VALUES\n";
+    $sql .= "INSERT INTO rooms (code,school_id,building,floor,rows_count,columns_count,physical_capacity,usable_capacity,seat_order,priority,status,notes) VALUES\n";
     $sql .= '(' . implode(',', $values) . ")\n";
-    $sql .= "ON DUPLICATE KEY UPDATE building=VALUES(building),floor=VALUES(floor),rows_count=VALUES(rows_count),columns_count=VALUES(columns_count),physical_capacity=VALUES(physical_capacity),usable_capacity=VALUES(usable_capacity),seat_order=VALUES(seat_order),priority=VALUES(priority),status=VALUES(status),notes=VALUES(notes);\n";
+    $sql .= "ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),building=VALUES(building),floor=VALUES(floor),rows_count=VALUES(rows_count),columns_count=VALUES(columns_count),physical_capacity=VALUES(physical_capacity),usable_capacity=VALUES(usable_capacity),seat_order=VALUES(seat_order),priority=VALUES(priority),status=VALUES(status),notes=VALUES(notes);\n";
     $sql .= "DELETE FROM room_seats WHERE room_id=(SELECT id FROM rooms WHERE code=" . sqlString($code) . " LIMIT 1);\n";
 
     $coordinates = [];

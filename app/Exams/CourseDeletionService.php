@@ -22,6 +22,8 @@ final class CourseDeletionService
             $q=$this->pdo->prepare('SELECT COUNT(*) FROM scheduling_run_items WHERE programme_course_id=?');
             $q->execute([$mappingId]);
             if((int)$q->fetchColumn())throw new RuntimeException('Cannot delete: this course mapping is referenced by scheduling history. Existing schedules must be preserved.');
+            $q=$this->pdo->prepare('SELECT COUNT(*) FROM student_course_registrations WHERE programme_course_id=?');$q->execute([$mappingId]);
+            if((int)$q->fetchColumn())throw new RuntimeException('Cannot delete: student academic history includes registrations for this course. Set the course inactive instead.');
             $q=$this->pdo->prepare('SELECT COUNT(*) FROM examinations e JOIN examination_cohorts ec ON ec.examination_id=e.id WHERE e.course_id=? AND ec.programme_id=? AND ec.semester <=> ?');
             $q->execute([$mapping['course_id'],$mapping['programme_id'],$mapping['semester']]);
             if((int)$q->fetchColumn())throw new RuntimeException('Cannot delete: this branch and semester already have examination records for the subject.');

@@ -260,7 +260,7 @@ Core workflows depend on the web host and MariaDB/MySQL database. CSV/XLSX files
 
 ### 7.1 Database Requirements
 
-The system shall use a relational database with primary keys, foreign keys, uniqueness constraints, and indexes for frequently accessed records. Related operations shall maintain referential integrity. The canonical schema currently defines 35 tables.
+The system shall use a relational database with primary keys, foreign keys, uniqueness constraints, and indexes for frequently accessed records. Related operations shall maintain referential integrity. The canonical schema currently defines 41 tables.
 
 Operational versions, attendance history, replacement reviews, and audit records shall be retained according to an approved university policy. Retention periods and archival responsibilities remain to be agreed.
 

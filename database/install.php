@@ -21,6 +21,9 @@ $rolesTableExists = (bool) $pdo->query("SHOW TABLES LIKE 'roles'")->fetchColumn(
 if (!$rolesTableExists) {
     $pdo->exec((string) file_get_contents(__DIR__ . '/schema.sql'));
 }
+$pdo->exec((string) file_get_contents(__DIR__ . '/academic-rollover.sql'));
+require_once $base . '/app/Rooms/RoomSchoolMigration.php';
+App\Rooms\RoomSchoolMigration::apply($pdo);
 $pdo->exec((string) file_get_contents(__DIR__ . '/seed.sql'));
 $pdo->exec("USE `{$databaseName}`");
 $roleId = $pdo->query("SELECT id FROM roles WHERE code='admin'")->fetchColumn();
