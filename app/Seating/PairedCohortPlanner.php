@@ -42,10 +42,11 @@ final class PairedCohortPlanner
         return compact('assigned','assignmentSeats','unallocated','capacity')+['rules'=>['mode'=>'paired_cohorts','school_isolation'=>true,'pairings'=>$rules,'room_columns'=>$roomColumns,'cohorts'=>$groups,'student_groups'=>$studentGroups]];
     }
 
-    public static function allows(array $rules,int $studentId,int $roomId,int $column): bool
+    public static function allows(array $rules,int $studentId,int $roomId,int $column,int $seatId=0): bool
     {
         if(($rules['mode']??'')!=='paired_cohorts')return true;
         $key=$rules['student_groups'][$studentId]??null;
+        if(($rules['allocation_mode']??'')==='automatic_pairs')return $key!==null&&$key===($rules['seat_groups'][$seatId]??null);
         foreach($rules['pairings']??[] as $pair)if(in_array($roomId,$pair['room_ids'],true))return $key!==null&&$key===($rules['room_columns'][$roomId][$column]??null);
         return false;
     }

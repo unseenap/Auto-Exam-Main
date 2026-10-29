@@ -20,7 +20,7 @@ final class SeatingRoster
     public function eligible(int $cycleId,?string $date=null,?int $shiftId=null): array
     {
         $period=$this->period($cycleId);
-        $q=$this->pdo->prepare("SELECT DISTINCT s.id AS student_id,s.normalized_roll_no,s.roll_no_original,s.name AS student_name,p.id AS programme_id,p.name AS programme_name,p.code AS programme_code,p.school_id,sc.code AS school_code,COALESCE(t.batch_id,s.batch_id) AS batch_id,b.label AS batch_label,b.start_year,b.end_year,COALESCE(t.semester,s.semester) AS semester,e.id AS examination_id,e.exam_date,e.shift_id,c.code AS course_code,c.name AS course_name,e.category
+        $q=$this->pdo->prepare("SELECT DISTINCT s.id AS student_id,s.normalized_roll_no,s.roll_no_original,s.name AS student_name,p.id AS programme_id,p.name AS programme_name,p.code AS programme_code,p.duration_semesters AS programme_duration_semesters,p.school_id,sc.code AS school_code,COALESCE(t.batch_id,s.batch_id) AS batch_id,b.label AS batch_label,b.start_year,b.end_year,COALESCE(t.semester,s.semester) AS semester,e.id AS examination_id,e.exam_date,e.shift_id,e.course_id,c.code AS course_code,c.name AS course_name,e.category
             FROM examinations e JOIN exam_eligibility ee ON ee.examination_id=e.id AND ee.eligibility_status='eligible'
             JOIN students s ON s.id=ee.student_id
             LEFT JOIN student_term_enrollments t ON t.student_id=s.id AND t.academic_session=? AND t.term=?
@@ -28,8 +28,11 @@ final class SeatingRoster
             LEFT JOIN batches b ON b.id=COALESCE(t.batch_id,s.batch_id) JOIN courses c ON c.id=e.course_id
             WHERE e.cycle_id=? AND (? IS NULL OR e.exam_date=?) AND (? IS NULL OR e.shift_id=?) AND e.status<>'cancelled'
             ORDER BY p.code,b.start_year,semester,s.normalized_roll_no");
-        $q->execute([$period['session'],$period['term'],$cycleId,$date,$date,$shiftId,$shiftId]);$rows=$q->fetchAll(PDO::FETCH_ASSOC);
-        foreach($rows as &$row){$row['group_key']=self::key($row);$row['study_year']=(int)ceil((int)$row['semester']/2);}unset($row);return $rows;
+        // Gather every shift first: a shared paper anywhere on the day blocks pairing.
+        $q->execute([$period['session'],$period['term'],$cycleId,$date,$date,null,null]);$rows=$q->fetchAll(PDO::FETCH_ASSOC);$dayPapers=[];
+        foreach($rows as &$row){$row['group_key']=self::key($row);$row['study_year']=(int)ceil((int)$row['semester']/2);$day=$row['exam_date'].'|'.$row['group_key'];$dayPapers[$day]=array_values(array_unique(array_merge($dayPapers[$day]??[],self::paperKeys($row))));}unset($row);
+        foreach($rows as &$row)$row['day_paper_ids']=$dayPapers[$row['exam_date'].'|'.$row['group_key']];unset($row);
+        return $shiftId===null?$rows:array_values(array_filter($rows,static fn(array $row):bool=>(int)$row['shift_id']===$shiftId));
     }
 
     public static function key(array $row): string
@@ -40,6 +43,23 @@ final class SeatingRoster
         $groups=[];foreach($students as $s){$key=$s['group_key'];if(!isset($groups[$key]))$groups[$key]=[
             'key'=>$key,'school_id'=>(int)$s['school_id'],'school_code'=>$s['school_code'],'programme_id'=>(int)$s['programme_id'],
             'programme_code'=>$s['programme_code'],'programme_name'=>$s['programme_name'],'batch_id'=>$s['batch_id'],'batch_label'=>$s['batch_label'],
-            'semester'=>(int)$s['semester'],'study_year'=>(int)ceil((int)$s['semester']/2),'label'=>$s['programme_code'].' · '.($s['batch_label']?:'No batch').' · Year '.(int)ceil((int)$s['semester']/2).' / Semester '.$s['semester'],'count'=>0];$groups[$key]['count']++;}return $groups;
+            'semester'=>(int)$s['semester'],'study_year'=>(int)ceil((int)$s['semester']/2),'final_year'=>(int)ceil((int)($s['programme_duration_semesters']??0)/2),'label'=>$s['programme_code'].' · '.($s['batch_label']?:'No batch').' · Year '.(int)ceil((int)$s['semester']/2).' / Semester '.$s['semester'],'count'=>0,'paper_ids'=>[]];$groups[$key]['count']++;
+            $groups[$key]['paper_ids']=array_values(array_unique(array_merge($groups[$key]['paper_ids'],$s['day_paper_ids']??self::paperKeys($s))));
+        }return $groups;
+    }
+
+    public static function paperKey(array $student): string
+    {
+        if(!empty($student['course_id']))return 'course:'.(int)$student['course_id'];
+        $code=strtoupper(trim((string)($student['course_code']??'')));
+        return $code!==''?'code:'.$code:'';
+    }
+
+    public static function paperKeys(array $student): array
+    {
+        $keys=[];if(!empty($student['course_id']))$keys[]='course:'.(int)$student['course_id'];
+        $code=strtoupper(preg_replace('/\s+/u','',trim((string)($student['course_code']??''))));
+        if($code!=='')$keys[]='code:'.$code;
+        return $keys;
     }
 }

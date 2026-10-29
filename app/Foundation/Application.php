@@ -154,6 +154,7 @@ final class Application
         if (preg_match('#^/rooms/(\d+)$#', $path, $matches) === 1 && $method === 'POST') return $this->saveRoom($request,(int)$matches[1]);
         if (preg_match('#^/rooms/(\d+)/edit$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/form',$this->roomFormData((int)$matches[1])));
         if (preg_match('#^/rooms/(\d+)/layout$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('rooms/layout',$this->roomLayoutData((int)$matches[1])));
+        if (preg_match('#^/rooms/(\d+)/layout.xlsx$#', $path, $matches) === 1 && $method === 'GET') return $this->roomLayoutXlsx((int)$matches[1]);
         if (preg_match('#^/rooms/(\d+)/delete$#', $path, $matches) === 1 && $method === 'POST') return $this->deleteMasterRecord($request,'rooms',(int)$matches[1],'rooms','room');
         if($path==='/exam-cycles'&&$method==='POST')return $this->saveExamCycle($request);
         if(preg_match('#^/exam-cycles/(\\d+)/delete(?:/(confirm))?$#',$path,$matches)===1&&in_array($method,['GET','POST'],true))return $this->deleteExamCycle($request,(int)$matches[1],$method,$matches[2]??'');
@@ -189,6 +190,7 @@ final class Application
         if(preg_match('#^/date-sheets/(\d+)/export.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->dateSheetXlsx((int)$matches[1]);
         if(preg_match('#^/date-sheets/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('exams/date-sheet',$this->dateSheetData((int)$matches[1])));
         if($path==='/seating/generate'&&$method==='POST')return $this->generateSeating($request);
+        if(preg_match('#^/seating/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/publish$#',$path,$matches)===1&&$method==='POST')return $this->publishSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/move$#',$path,$matches)===1&&$method==='POST')return $this->moveSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/assign-unallocated$#',$path,$matches)===1&&$method==='POST')return $this->assignUnallocated($request,(int)$matches[1]);
@@ -612,6 +614,14 @@ final class Application
         $q=$this->database->connection()->prepare('SELECT * FROM room_seats WHERE room_id=:id ORDER BY row_no,column_no');$q->execute(['id'=>$id]);return ['room'=>$room,'seats'=>$q->fetchAll(PDO::FETCH_ASSOC)];
     }
 
+    private function roomLayoutXlsx(int $id): Response
+    {
+        $data=$this->roomLayoutData($id);
+        $bytes=(new \App\Export\SeatingPlanXlsx())->buildRoomLayout($data['room'],$data['seats']);
+        $code=trim(preg_replace('/[^A-Za-z0-9_-]+/','-',$data['room']['code']),'-')?:'room-'.$id;
+        return Response::xlsx($bytes,'room-layout-'.$code.'.xlsx');
+    }
+
     private function audit(PDO $pdo,string $action,string $entityType,int $entityId,array $newValues): void
     {
         $pdo->prepare('INSERT INTO audit_logs(user_id,action,entity_type,entity_id,new_values,ip_address,user_agent) VALUES(:user,:action,:type,:id,:values,:ip,:agent)')
@@ -933,6 +943,18 @@ final class Application
     private function dateSheetImportPreview(int $cycleId,int $id): array {$pdo=$this->database->connection();$q=$pdo->prepare("SELECT * FROM import_batches WHERE id=:id AND import_type='date_sheet'");$q->execute(['id'=>$id]);$batch=$q->fetch(PDO::FETCH_ASSOC);if(!$batch)throw new \RuntimeException('Import not found.');$q=$pdo->prepare('SELECT *, source_row_number AS row_number FROM import_rows WHERE import_batch_id=:id ORDER BY source_row_number');$q->execute(['id'=>$id]);return compact('cycleId','batch')+['rows'=>$q->fetchAll(PDO::FETCH_ASSOC),'error'=>$this->session->pullFlash('error')];}
     private function commitDateSheetImport(Request $request,int $cycleId,int $id): Response {if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}/import/{$id}"));$pdo=$this->database->connection();try{$pdo->beginTransaction();$count=(new DateSheetImportService($pdo))->commit($id,(int)$this->auth->user()['id']);$pdo->commit();$this->session->flash('success',"{$count} papers imported.");return Response::redirect(url("date-sheets/{$cycleId}"));}catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',$e->getMessage());return Response::redirect(url("date-sheets/{$cycleId}/import/{$id}"));}}
 
+    private function deleteSeating(Request $request,int $id): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('seating'));
+        try {
+            (new \App\Seating\SeatingDeletionService($this->database->connection()))->delete($id,(int)$this->auth->user()['id']);
+            $this->session->flash('success','Seating plan deleted. Examination schedules and student records are unchanged.');
+        } catch(\Throwable $e) {
+            $this->session->flash('error',$e->getMessage());
+        }
+        return Response::redirect(url('seating'));
+    }
+
     private function seatingData(): array
     {
         return ['allocations'=>$this->database->connection()->query("SELECT sa.*,ec.name AS cycle_name,es.name AS shift_name,
@@ -955,7 +977,7 @@ final class Application
             foreach($bySession as $key=>$rows){$sessionGroups[$key]=array_values(\App\Seating\SeatingRoster::groups($rows));foreach($sessionGroups[$key] as $group){$sc=$group['school_id'];if(!isset($demands[$key][$sc]))$demands[$key][$sc]=['id'=>$sc,'code'=>$group['school_code'],'demand'=>0];$demands[$key][$sc]['demand']+=$group['count'];}}
         }
         foreach($sessions as &$session)$session['school_demands']=array_values($demands[$session['exam_date'].'|'.$session['shift_id']]??[]);unset($session);
-        $roomOptions=$pdo->query("SELECT r.id,r.code,r.building,r.usable_capacity,r.school_id,sc.code AS school_code FROM rooms r JOIN schools sc ON sc.id=r.school_id WHERE r.status='active' AND sc.status='active' ORDER BY sc.code,r.priority,r.code")->fetchAll(PDO::FETCH_ASSOC);
+        $roomOptions=$pdo->query("SELECT r.id,r.code,r.building,r.columns_count,r.usable_capacity,r.priority,r.school_id,sc.code AS school_code FROM rooms r JOIN schools sc ON sc.id=r.school_id WHERE r.status='active' AND sc.status='active' ORDER BY sc.code,r.priority,r.code")->fetchAll(PDO::FETCH_ASSOC);
         $seatOptions=[];$counts=[];foreach($pdo->query("SELECT rs.room_id,rs.row_no,rs.column_no,r.usable_capacity FROM room_seats rs JOIN rooms r ON r.id=rs.room_id JOIN schools sc ON sc.id=r.school_id WHERE r.status='active' AND sc.status='active' AND rs.is_blocked=0 ORDER BY r.priority,r.code,rs.sequence_no") as $seat){$room=(int)$seat['room_id'];if(($counts[$room]??0)>=(int)$seat['usable_capacity'])continue;$seatOptions[$room][]=[(int)$seat['row_no'],(int)$seat['column_no']];$counts[$room]=($counts[$room]??0)+1;}
         return ['cycles'=>$cycles,'sessions'=>$sessions,'rooms'=>$roomOptions,'sessionGroups'=>$sessionGroups,'seatOptions'=>$seatOptions,'cycleId'=>$cycleId,'oldSeating'=>$this->session->pullFlash('old_seating',[]),'error'=>$this->session->pullFlash('error')];
     }
@@ -965,9 +987,11 @@ final class Application
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('seating'));
         $cycleId=(int)$request->input('cycle_id');$date=(string)$request->input('exam_date');$shiftId=(int)$request->input('shift_id');
         $pairings=(array)$request->input('pairings',[]);$roomIds=[];foreach($pairings as $pair)if(is_array($pair))foreach((array)($pair['room_ids']??[]) as $room)$roomIds[]=(int)$room;$roomIds=array_values(array_unique($roomIds));
-        try{$result=(new SeatingAllocator($this->database->connection()))->generate($cycleId,$date,$shiftId,$roomIds,(int)$this->auth->user()['id'],hash('sha256',json_encode([$cycleId,$date,$shiftId,$pairings])),['mode'=>'paired_cohorts','pairings'=>$pairings]);
-            $this->session->flash('success',"{$result['assigned']} students assigned. {$result['unallocated']} unallocated. Each room follows its saved branch/batch pairing.");return Response::redirect(url('seating/'.$result['allocation_id']));}
-        catch(\Throwable $e){$this->session->flash('old_seating',['session'=>$date.'|'.$shiftId,'pairings'=>$pairings]);$this->session->flash('error',$e->getMessage());return Response::redirect(url('seating/generate?cycle_id='.$cycleId));}
+        $automatic=$request->input('allocation_mode')==='automatic_pairs';$seatRemaining=$request->input('seat_remaining')==='1';$alternateUnmatched=$request->input('seat_remaining')==='2';
+        if($automatic)$roomIds=array_map('intval',$this->database->connection()->query("SELECT DISTINCT r.id FROM rooms r JOIN schools sc ON sc.id=r.school_id JOIN room_seats rs ON rs.room_id=r.id WHERE r.status='active' AND sc.status='active' AND rs.is_blocked=0 AND r.usable_capacity>0 ORDER BY r.id")->fetchAll(PDO::FETCH_COLUMN));
+        try{$result=(new SeatingAllocator($this->database->connection()))->generate($cycleId,$date,$shiftId,$roomIds,(int)$this->auth->user()['id'],hash('sha256',json_encode([$cycleId,$date,$shiftId,$pairings])),['mode'=>'paired_cohorts','pairings'=>$pairings,'allocation_mode'=>$automatic?'automatic_pairs':'manual_rooms','seat_remaining'=>$seatRemaining,'alternate_unmatched'=>$alternateUnmatched]);
+            $this->session->flash('success',"{$result['assigned']} students assigned. {$result['unallocated']} unallocated. Your branch/batch pairings and room priorities were applied.");return Response::redirect(url('seating/'.$result['allocation_id']));}
+        catch(\Throwable $e){$this->session->flash('old_seating',['session'=>$date.'|'.$shiftId,'pairings'=>$pairings,'seat_remaining'=>$seatRemaining,'alternate_unmatched'=>$alternateUnmatched]);$this->session->flash('error',$e->getMessage());return Response::redirect(url('seating/generate?cycle_id='.$cycleId));}
     }
 
     private function seatingPlanXlsx(int $id): Response
@@ -987,7 +1011,7 @@ final class Application
         $document=(new \App\Seating\SeatingPlanDocument($pdo))->build($id);$rules=$document['rules'];$roomPairs=[];foreach($rules['pairings']??[] as $pair)foreach($pair['room_ids'] as $roomId)$roomPairs[$roomId]=$pair;
         foreach($assignments as &$student)$student['group_key']=$rules['student_groups'][$student['student_id']]??'';unset($student);
         foreach($unallocated as &$student)$student['group_key']=$rules['student_groups'][$student['student_id']]??'';unset($student);
-        foreach($availableSeats as &$seat){$pair=$roomPairs[$seat['room_id']]??null;$seat['group_key']=($rules['mode']??'')==='paired_cohorts'?($rules['room_columns'][$seat['room_id']][$seat['column_no']]??'unavailable'):'';}unset($seat);
+        foreach($availableSeats as &$seat){$seat['group_key']=($rules['mode']??'')==='paired_cohorts'?(($rules['allocation_mode']??'')==='automatic_pairs'?($rules['seat_groups'][$seat['id']]??'unavailable'):($rules['room_columns'][$seat['room_id']][$seat['column_no']]??'unavailable')):'';}unset($seat);
         $validation=(new SeatingAllocator($pdo))->validate($id);return compact('allocation','assignments','byRoom','validation','unallocated','availableSeats','document')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 

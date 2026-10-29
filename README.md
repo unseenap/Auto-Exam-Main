@@ -67,8 +67,21 @@ Student year, semester and session now advance automatically from the academic c
 
 ## Latest updates
 
+- **Current pairing rule:** automatic pairing uses different branches within the same school, regardless of batch or year. Same-branch students never sit side by side. A shared course or course code on the exam day still blocks pairing. Alternating-column seating is the default fallback for a single branch or other unmatched groups; partner columns stay empty. Earlier saved plans retain their saved policy until regenerated.
+
+- **No-pair fallback:** **Groups without a pair → Alternate columns · partner stays empty** is the default. Multiple unmatched groups can be seated without a valid year/branch/paper partner, using one usable column per empty column pair. Existing paired columns are preserved. The preview reports reserved columns, and saved-plan validation prevents filling them. Capacity shortages remain visible for review.
+
+- **Year-based automatic pairing:** choose both patterns, 1st ↔ 3rd only, or 2nd ↔ final only, then auto-pair and generate. Final year follows the partner programme’s semester duration. Different-branch and neighbour checks remain mandatory. Shared course IDs or normalized course codes anywhere on the same examination day, including another shift, block pairing; previews, manual corrections, and publication checks apply the same policy to new plans.
+
+- **Room geometry Excel export:** each room card and seat-map page offers **Download layout Excel**, with the saved seat labels, blocked-position shading, desk/aisle layout, whiteboard and invigilator landmarks, capacity information, and landscape printing. It works before any seating allocation is generated.
+
+- **Different papers for neighbouring students:** the automatic planner checks the shared course/paper identity within the selected date and shift, even when branches have separate examination records. Groups sharing a paper are excluded from pair suggestions. Neighbouring seat checks, safe remainder placement, manual corrections, and publication validation enforce this rule for new plans.
+
+- **Branch separation in automatic seating:** suggestions and manual selections in the automatic planner pair different programmes only, including across batches and years. Allocation checks adjacent positions and desk partners in the saved usable room layout, swaps pair orientation when needed, and leaves unsafe leftover seats empty. New plans record this rule for publication validation; older saved versions keep their existing policy.
+
 The current revision adds the following operational and UI improvements:
 
+- **Remaining-student seating pairs:** each pair reserves equal student counts; fully paired cohorts are disabled in later selectors, while surplus students remain available. Pair arrows control allocation order, and optional room preferences control which rooms are tried first. Full rooms automatically overflow to other active rooms in the same school, and different pairs can share vacant desk pairs. The final remaining cohort in each school can either be seated automatically or left unallocated for review. Existing saved seating versions retain their original rules.
 - **Automatic batch progression:** regular, mid-semester and end-semester cycles derive each selected batch's current semester from its admission years, programme duration, academic session and cycle date. Completed or not-yet-started batches are blocked from regular scheduling.
 - **Batch-safe scheduling:** validation and generation retain a batch-to-semester snapshot so subjects from historical or future semesters cannot leak into a regular date sheet.
 - **Programme bulk import:** administrators can download a CSV template, validate CSV/XLSX programme files, review valid and invalid rows, and commit only accepted records.

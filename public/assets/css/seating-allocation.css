@@ -1,0 +1,65 @@
+/* The generated plan workspace. Official room sheets keep their own print styling. */
+.allocation-dashboard{--allocation-green:#12563f;--allocation-ink:#203d30;--allocation-muted:#677b6e;--allocation-line:#dbe5de;color:var(--allocation-ink);max-width:1600px;margin:auto}
+.allocation-dashboard-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:24px}
+.allocation-dashboard-heading>div:first-child{min-width:0}
+.allocation-back{display:inline-block;color:var(--allocation-muted);font-size:12px;font-weight:650;text-decoration:none;margin-bottom:20px}
+.allocation-eyebrow{color:var(--allocation-green);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.1em;margin:0 0 9px}
+.allocation-dashboard h1{margin:0;font-size:clamp(25px,3vw,35px);letter-spacing:-.035em;line-height:1.2;overflow-wrap:anywhere}
+.allocation-session-label{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:12px 0 0;font-size:13px;color:var(--allocation-muted)}
+.allocation-primary-actions{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:8px;flex:none;max-width:520px}
+.allocation-primary-actions form{margin:0}
+.allocation-dashboard :is(.primary-button,.secondary-button){display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 14px;border-radius:8px;font:inherit;font-size:12px;font-weight:700;text-decoration:none;cursor:pointer}
+.allocation-dashboard .primary-button{background:var(--allocation-green);color:white;border:1px solid var(--allocation-green)}
+.allocation-dashboard .secondary-button{border:1px solid #ccdbd1;background:white;color:#3e5b49}
+.allocation-dashboard .secondary-button:hover:not(:disabled){background:#edf5ef;border-color:#a0bea9}
+.allocation-dashboard .primary-button:hover:not(:disabled){background:#0b4430}
+.allocation-dashboard button:disabled{opacity:.45;cursor:not-allowed}
+.allocation-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(240px,1.4fr);border:1px solid var(--allocation-line);border-radius:13px;background:#fff;margin-bottom:24px;overflow:hidden}
+.allocation-overview>div{padding:20px 24px;border-right:1px solid #e3eae5}
+.allocation-overview>div:last-child{border:0}
+.allocation-overview>div>span{display:block;font-size:11px;color:var(--allocation-muted)}
+.allocation-overview>div>strong{display:block;margin-top:7px;font-size:29px;font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.allocation-overview .needs-attention{background:#fff9ed;color:#8c5b18}
+.allocation-overview .allocation-check{display:flex;gap:12px;align-items:center;background:#f6faf6}
+.allocation-check>.ti{font-size:24px;color:var(--allocation-green)}
+.allocation-check strong{display:block;font-size:13px}.allocation-check span{display:block;margin-top:6px;font-size:11px;line-height:1.6;color:var(--allocation-muted)}
+.allocation-workspace-bar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-bottom:12px;border-bottom:1px solid var(--allocation-line);margin-bottom:22px}
+.allocation-workspace-bar nav{display:flex;gap:6px;flex-wrap:wrap}
+.allocation-workspace-bar nav a{display:flex;gap:8px;align-items:center;padding:10px 13px;min-height:44px;box-sizing:border-box;font-size:12px;font-weight:650;text-decoration:none;color:#587160;border-radius:8px}
+.allocation-workspace-bar nav a:hover,.allocation-workspace-bar nav a.active{background:#e7f0e9;color:var(--allocation-green)}
+.allocation-issue-count{padding:2px 6px;border-radius:20px;background:#f5e6c9;color:#815a1d;font-size:10px}
+.allocation-more{position:relative;flex:none}.allocation-more>summary{font-size:12px;cursor:pointer;padding:13px 4px;color:#64786b;min-height:44px;box-sizing:border-box}
+.allocation-more>div{position:absolute;z-index:5;right:0;top:100%;width:210px;padding:6px;border:1px solid var(--allocation-line);border-radius:9px;background:#fff;box-shadow:0 10px 26px #14372218}
+.allocation-more a,.allocation-more button{display:block;width:100%;box-sizing:border-box;text-align:left;padding:12px 10px;font:inherit;font-size:12px;text-decoration:none;border:0;background:none;color:#335d43;cursor:pointer;border-radius:5px}
+.allocation-more button{color:#9b4336}.allocation-more a:hover,.allocation-more button:hover{background:#f4f7f4}
+.allocation-room-toolbar{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:12px}
+.allocation-dashboard h2{font-size:17px;margin:0;letter-spacing:-.02em}
+.allocation-room-toolbar p,.allocation-tools>header p{margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--allocation-muted)}
+.allocation-room-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex:none;max-width:100%}
+.allocation-dashboard select,.allocation-dashboard input:not([type=hidden]){height:44px;border:1px solid #cbd9cf;border-radius:7px;padding:0 11px;background:#fff;color:#294933;font:inherit;font-size:12px;max-width:100%}
+.allocation-room-controls select{width:225px}.allocation-room-controls>span{font-size:11px;color:var(--allocation-muted);min-width:42px;text-align:center}.allocation-room-controls .secondary-button{min-width:44px;padding:8px}
+.allocation-room-help{display:flex;align-items:center;gap:8px;font-size:11px;line-height:1.6;color:#738577;margin:0 0 16px}
+.allocation-room-panel{min-width:0;border:1px solid var(--allocation-line);border-radius:12px;background:#fff;overflow:hidden;margin-bottom:20px;box-shadow:0 3px 12px #15392405}
+.allocation-dashboard .seating-document-scroll{margin:0;padding:8px}
+.allocation-dashboard .university-room-sheet{margin-bottom:0}
+.allocation-dashboard .university-student-summary :is(th,td){white-space:normal;overflow-wrap:anywhere}
+.allocation-dashboard [hidden]{display:none!important}
+.allocation-no-rooms{padding:40px 24px;text-align:center;border:1px dashed #cbd9ce;border-radius:12px;background:#fff}.allocation-no-rooms h3{font-size:16px;margin:0 0 8px}.allocation-no-rooms p{font-size:12px;line-height:1.6;color:var(--allocation-muted)}
+.allocation-tools{margin-top:32px;scroll-margin-top:100px}#room-plans{scroll-margin-top:100px}
+.allocation-tools>header{margin-bottom:16px}.allocation-tools-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+.allocation-tool{border:1px solid var(--allocation-line);border-radius:11px;background:#fff;overflow:hidden;min-width:0}
+.allocation-tool>summary{display:flex;align-items:center;gap:12px;padding:17px 20px;min-height:76px;box-sizing:border-box;cursor:pointer;font-size:13px;font-weight:700;list-style:none}
+.allocation-tool>summary::-webkit-details-marker{display:none}.allocation-tool>summary:after{content:'+';margin-left:auto;color:#60836b;font-size:20px;font-weight:400}.allocation-tool[open]>summary:after{content:'−'}
+.allocation-tool>summary small{display:block;font-size:11px;color:var(--allocation-muted);font-weight:400;margin-top:5px;line-height:1.5}
+.allocation-tool[open]>summary{border-bottom:1px solid #e5ece6;background:#f9fbf8}
+.allocation-tool-body{padding:20px;min-width:0}.allocation-tool-body .form-section-heading{display:none}
+.allocation-tool-body .form-grid{grid-template-columns:1fr;gap:14px}
+.allocation-tool-body label{display:grid;gap:7px;font-size:12px;font-weight:600;color:#506b58;min-width:0}
+.allocation-tool-body label input,.allocation-tool-body label select{width:100%}
+.allocation-tool-body .pairing-rules-summary{padding:0}.allocation-tool-body p{font-size:12px;line-height:1.7;color:#526e5c}
+.allocation-exceptions{grid-column:1/-1;border-color:#e5d6b8}.allocation-exceptions>summary{background:#fffbf2!important}.allocation-exceptions .table-scroll{max-width:100%;overflow:auto}.allocation-exceptions .inline-form{min-width:210px}.allocation-exceptions .inline-form select{min-width:145px}
+.allocation-validation-list{margin:0}.allocation-validation-list>div{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid #edf1ed;font-size:12px}.allocation-validation-list dt{color:#5e7564}.allocation-validation-list dd{font-weight:700;margin:0}
+.allocation-dashboard :is(a,button,select,input,summary,[tabindex]):focus-visible{outline:3px solid #b68c37;outline-offset:3px}
+@media(max-width:1250px){.allocation-dashboard-heading{align-items:flex-start;flex-direction:column}.allocation-primary-actions{justify-content:flex-start;max-width:none}.allocation-overview{grid-template-columns:repeat(3,minmax(0,1fr))}.allocation-overview .allocation-check{grid-column:1/-1;border-top:1px solid var(--allocation-line)}.allocation-overview>div:nth-child(3){border-right:0}.allocation-room-toolbar{align-items:flex-start;flex-direction:column}}
+@media(max-width:700px){.allocation-overview>div{padding:17px 14px}.allocation-overview>div>span{font-size:10px}.allocation-overview>div>strong{font-size:25px}.allocation-tools-grid{grid-template-columns:1fr}.allocation-workspace-bar{align-items:flex-start}.allocation-workspace-bar nav{flex-direction:column}.allocation-room-controls{width:100%}.allocation-room-controls select{flex:1;min-width:140px;width:auto}.allocation-dashboard h1{font-size:26px}.allocation-primary-actions{width:100%}.allocation-primary-actions>a,.allocation-primary-actions>button{flex:1}.allocation-primary-actions>form,.allocation-primary-actions>form button{width:100%}.allocation-dashboard-heading{gap:18px}.allocation-dashboard .seating-document-scroll{padding:4px}.allocation-tool-body{padding:16px}}
+@media print{.allocation-dashboard .allocation-room-panel,.allocation-dashboard .allocation-room-panel[hidden]{display:block!important;border:0;border-radius:0;margin:0;box-shadow:none;overflow:visible}.allocation-dashboard .seating-document-scroll{overflow:visible;padding:0;margin:0}.allocation-room-panel{break-after:page}.allocation-room-panel:last-child{break-after:auto}.allocation-dashboard .university-room-sheet{break-after:auto}}
