@@ -23,6 +23,9 @@ final class TabularReader
     {
         $handle = fopen($path, 'rb');
         if (!$handle) throw new RuntimeException('The uploaded CSV could not be opened.');
+        // Strip the UTF-8 BOM before CSV parsing so a quoted first header is
+        // still recognized as a quoted field (Excel includes this marker).
+        if (fread($handle, 3) !== "\xEF\xBB\xBF") rewind($handle);
         $rows = [];
         while (($row = fgetcsv($handle)) !== false) $rows[] = array_map(static fn($value) => trim((string) $value), $row);
         fclose($handle);

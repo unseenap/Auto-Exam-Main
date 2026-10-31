@@ -15,16 +15,18 @@ final class ExamCycleDeletionService
         if(!$cycle)throw new RuntimeException('Examination cycle not found.');
         if(!in_array($cycle['status'],['draft','published'],true))throw new RuntimeException('Closed and archived examination cycles are protected.');
         $published=$cycle['status']==='published';
-        if($published){$q=$this->pdo->prepare("SELECT COUNT(*) FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.status='active' AND r.code='admin'");$q->execute([$userId]);if(!(int)$q->fetchColumn())throw new RuntimeException('Only an active administrator can delete a published date sheet and its examination cycle.');}
+        $q=$this->pdo->prepare("SELECT COUNT(*) FROM scheduling_runs WHERE cycle_id=? AND status IN ('approved','published')");$q->execute([$id]);$approvedRuns=(int)$q->fetchColumn();
+        if($published||$approvedRuns){$q=$this->pdo->prepare("SELECT COUNT(*) FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.status='active' AND r.code='admin'");$q->execute([$userId]);if(!(int)$q->fetchColumn())throw new RuntimeException('Only an active administrator can delete a cycle with an approved or published date sheet.');}
         $checks=[
-            "SELECT COUNT(*) FROM seating_allocations WHERE cycle_id=? AND status<>'draft'",
-            'SELECT COUNT(*) FROM invigilation_allocations WHERE cycle_id=?',
-            'SELECT COUNT(*) FROM attendance a JOIN examinations e ON e.id=a.examination_id WHERE e.cycle_id=?'
+            "SELECT COUNT(*) FROM seating_allocations WHERE cycle_id=? AND status<>'draft'"=>'non-draft seating plans. Delete eligible seating plans from Seating plans first',
+            'SELECT COUNT(*) FROM invigilation_allocations WHERE cycle_id=?'=>'invigilation duties. Remove the linked duties before deleting this cycle',
+            'SELECT COUNT(*) FROM attendance a JOIN examinations e ON e.id=a.examination_id WHERE e.cycle_id=?'=>'attendance records. This cycle cannot be deleted while attendance records are linked'
         ];
-        if(!$published){$checks[]="SELECT COUNT(*) FROM examinations WHERE cycle_id=? AND status<>'draft'";$checks[]="SELECT COUNT(*) FROM scheduling_runs WHERE cycle_id=? AND status IN ('approved','published')";}
-        foreach($checks as $sql){$q=$this->pdo->prepare($sql);$q->execute([$id]);if((int)$q->fetchColumn())throw new RuntimeException('This cycle contains protected examination, seating, approval, attendance or invigilation records and cannot be deleted.');}
+        if(!$published)$checks["SELECT COUNT(*) FROM examinations WHERE cycle_id=? AND status<>'draft'"]='non-draft examination papers. Review their publication status before deleting this draft cycle';
+        foreach($checks as $sql=>$reason){$q=$this->pdo->prepare($sql);$q->execute([$id]);$count=(int)$q->fetchColumn();if($count)throw new RuntimeException("This cycle has {$count} {$reason}.");}
         $counts=[];
         foreach(['examinations'=>'Papers','seating_allocations'=>'Draft seating versions','scheduling_runs'=>'Scheduling runs','exam_shifts'=>'Shifts','exam_calendar_dates'=>'Calendar dates'] as $table=>$label){$q=$this->pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE cycle_id=?");$q->execute([$id]);$counts[$label]=(int)$q->fetchColumn();}
+        $counts['Approved / published scheduling runs']=$approvedRuns;
         return ['cycle'=>$cycle,'counts'=>$counts];
     }
 

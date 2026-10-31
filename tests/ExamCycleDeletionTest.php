@@ -38,7 +38,23 @@ try{
     assert((int)$pdo->query("SELECT COUNT(*) FROM scheduling_runs WHERE id={$run}")->fetchColumn()===0);
     assert((int)$pdo->query("SELECT COUNT(*) FROM scheduling_run_items WHERE scheduling_run_id={$run}")->fetchColumn()===0);
     foreach(['exam_cycles'=>'id','examinations'=>'cycle_id','exam_shifts'=>'cycle_id','exam_calendar_dates'=>'cycle_id'] as $table=>$column)assert((int)$pdo->query("SELECT COUNT(*) FROM {$table} WHERE {$column}={$cycle}")->fetchColumn()===0);
+    // Approval alone must not prevent an administrator deleting an unpublished cycle.
+    $draft=$exams->createCycle(['name'=>'Approved unpublished draft','academic_year'=>'2026-2027','exam_type'=>'end_sem','start_date'=>'2026-09-16','end_date'=>'2026-09-16','duration'=>180,'shifts'=>[['name'=>'Morning','start'=>'09:30','end'=>'12:30','duration'=>180]]],$user);
+    $draftShift=(int)$pdo->query("SELECT id FROM exam_shifts WHERE cycle_id={$draft}")->fetchColumn();
+    $draftPaper=$exams->schedule(['cycle_id'=>$draft,'shift_id'=>$draftShift,'course_id'=>$mapping['course_id'],'programme_id'=>$mapping['programme_id'],'semester'=>$mapping['semester'],'section'=>$mapping['section'],'batch_label'=>$batchLabel,'exam_date'=>'2026-09-16','category'=>'regular','display_label'=>'Approved test']);
+    $pdo->prepare("INSERT INTO scheduling_runs(cycle_id,school_id,status,rule_snapshot,created_by) VALUES(?,?,'approved','{}',?)")->execute([$draft,$school,$user]);$draftRun=(int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO scheduling_run_items(scheduling_run_id,examination_id,programme_course_id,assigned_date,shift_id,item_status) VALUES(?,?,?,'2026-09-16',?,'scheduled')")->execute([$draftRun,$draftPaper,$mapping['id'],$draftShift]);
+    $pdo->prepare('UPDATE examinations SET generated_by_run_id=? WHERE id=?')->execute([$draftRun,$draftPaper]);
+    $caught=false;try{$service->preview($draft,$controller);}catch(RuntimeException $e){$caught=str_contains($e->getMessage(),'administrator');}assert($caught);
+    $preview=$service->preview($draft,$user);assert($preview['counts']['Approved / published scheduling runs']===1);
+    $caught=false;try{$service->delete($draft,$controller,'Approved unpublished draft',$service::fingerprint($preview));}catch(RuntimeException $e){$caught=true;}assert($caught);
+    // An approval arriving after the review must invalidate its confirmation.
+    $pdo->prepare("UPDATE scheduling_runs SET status='generated' WHERE id=?")->execute([$draftRun]);$stale=$service::fingerprint($service->preview($draft,$user));
+    $pdo->prepare("UPDATE scheduling_runs SET status='approved' WHERE id=?")->execute([$draftRun]);
+    $caught=false;try{$service->delete($draft,$user,'Approved unpublished draft',$stale);}catch(RuntimeException $e){$caught=str_contains($e->getMessage(),'changed');}assert($caught);
+    $service->delete($draft,$user,'Approved unpublished draft',$service::fingerprint($service->preview($draft,$user)));
+    foreach(['exam_cycles'=>'id','examinations'=>'cycle_id','scheduling_runs'=>'cycle_id','exam_shifts'=>'cycle_id'] as $table=>$column)assert((int)$pdo->query("SELECT COUNT(*) FROM {$table} WHERE {$column}={$draft}")->fetchColumn()===0);
     assert((int)$pdo->query("SELECT COUNT(*) FROM courses WHERE id=".(int)$mapping['course_id'])->fetchColumn()===1);
-    assert((int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action='exam_cycle.deleted'")->fetchColumn()===1);
-    echo "Exam cycle deletion: PASS (name confirmation, stale review, admin-only published deletion, linked records, master preservation, audit)\n";
+    assert((int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action='exam_cycle.deleted'")->fetchColumn()===2);
+    echo "Exam cycle deletion: PASS (name confirmation, stale approval review, admin-only approved/published deletion, linked records, master preservation, audit)\n";
 }finally{$server->exec("DROP DATABASE IF EXISTS `{$testDb}`");}

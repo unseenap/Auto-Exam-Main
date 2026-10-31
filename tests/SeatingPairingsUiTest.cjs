@@ -47,6 +47,8 @@ assert.equal(suggestPairs(yearOptions.map(g=>({...g,study_year:1}))).length,2,'S
 const unmatchedGroups=[{key:'A',study_year:1,final_year:4,count:30,school_id:1,programme_id:1},{key:'C',study_year:1,final_year:4,count:30,school_id:1,programme_id:3}];
 const alternate=previewAllocation(unmatchedGroups,rooms,seats,[],false,true);
 assert.equal(alternate.assigned,60);
+assert.deepEqual(alternate.roomAssigned,{1:20,2:20,3:20});
+assert.deepEqual(alternate.reservedByRoom,{1:20,2:20,3:20});
 assert.deepEqual(Object.values(alternate.emptyPartnerColumns).map(columns=>[...columns]),[[2],[2],[2]]);
 assert.equal(previewAllocation(unmatchedGroups,rooms.slice(0,1),seats,[],false,true).assigned,20);
 assert.equal(previewAllocation(groups,rooms,seats,[pairs[0]],false,true).assigned,80);

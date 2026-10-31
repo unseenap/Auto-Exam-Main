@@ -31,10 +31,14 @@ const { chromium } = require('playwright');
     assert.equal(await page.locator('#generate-button').isDisabled(),false,'No-pair session could not generate spaced seating');
     assert.match(await page.locator('#pairing-summary').innerText(),/^48 of 70/);
     assert.equal(await page.locator('#preview-empty-columns').innerText(),'8');
+    assert.equal(await page.locator('#available-seat-total').innerText(),'96','Availability included rooms from a different school');
+    assert.equal(await page.locator('#preview-reserved-seats').innerText(),'48');
+    assert.equal(await page.locator('#room-capacity-rows tr').count(),2);
     await page.locator('#seat-remaining').selectOption('0');
     assert.equal(await page.locator('#generate-button').isDisabled(),true,'Review-only mode generated without pairs');
     await page.locator('#seat-remaining').selectOption('2');
     await session.selectOption(values[1]);
+    assert.equal(await page.locator('#available-seat-total').innerText(),'144','Session school scope did not update seat availability');
     assert.equal(await page.locator('#pairing-pattern').count(),0,'Obsolete year restriction is still visible');
     assert.equal(await page.locator('#suggest-pairings').isDisabled(),false);
     // Bulk suggestions remain reviewable and can be undone without losing manual work.

@@ -44,6 +44,10 @@ try{
     $response=$invoke('seatingPlanXlsx',$id);pairedCheck(strlen((new ReflectionProperty($response,'content'))->getValue($response))>1000,'Excel route did not return workbook bytes.');
     $roomResponse=$invoke('roomLayoutXlsx',$rooms[0]);pairedCheck(strlen((new ReflectionProperty($roomResponse,'content'))->getValue($roomResponse))>1000,'Room geometry Excel handler did not return workbook bytes.');
     $roomView=App\View\View::render('rooms/layout',$invoke('roomLayoutData',$rooms[0]));pairedCheck(str_contains($roomView,'/layout.xlsx'),'Room layout download action is missing.');
+    $roomDirectory=$invoke('roomData',$request);foreach(['active','inactive','maintenance'] as $i=>$roomStatus)$roomDirectory['rooms'][$i]['status']=$roomStatus;
+    $directoryHtml=App\View\View::render('rooms/index',$roomDirectory);file_put_contents($out.'/sample-rooms.html',$directoryHtml);
+    foreach(['active','inactive','maintenance'] as $roomStatus)pairedCheck(str_contains($directoryHtml,'data-room-status="'.$roomStatus.'"'),'Room directory did not render '.$roomStatus.' status.');
+    $roomDirectory['rooms']=[];file_put_contents($out.'/sample-rooms-empty.html',App\View\View::render('rooms/index',$roomDirectory));
     $_POST=['_token'=>$app->session()->csrfToken(),'cycle_id'=>$cycle,'exam_date'=>'2026-10-26','shift_id'=>$shift,'pairings'=>[$pair]];
     $invoke('generateSeating',$request);pairedCheck(str_contains($app->session()->pullFlash('success',''),'70 students assigned'),'Generation form did not submit pairings correctly.');
     $generatedRules=json_decode($pdo->query('SELECT rule_profile FROM seating_allocations ORDER BY id DESC LIMIT 1')->fetchColumn(),true);pairedCheck($generatedRules['mode']==='paired_cohorts','Generation form saved legacy rules.');

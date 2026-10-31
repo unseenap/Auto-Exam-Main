@@ -90,3 +90,8 @@
 #paired-seating-form .pairing-pattern-label{display:grid;margin-top:16px;gap:7px}
 
 .pairing-auto-help{margin:14px 0 0;color:var(--pair-muted);font-size:11px;line-height:1.6}
+.pairing-capacity-overview{min-width:0;margin:0 0 26px;padding:17px 22px;border:1px solid #cfe2d4;border-radius:12px;background:#edf5ef}
+.pairing-capacity-total{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.pairing-capacity-total>.ti{font-size:23px;color:#447b56}.pairing-capacity-total strong{font-size:28px;letter-spacing:-.04em;font-variant-numeric:tabular-nums;color:var(--pair-ink)}.pairing-capacity-total>span{font-size:13px;color:#41644c}.pairing-capacity-total small{margin-left:auto;font-size:11px;color:#69806f}
+.pairing-capacity-overview>p{font-size:11px;color:#69806f;margin:7px 0 0;line-height:1.7}.pairing-capacity-overview summary{cursor:pointer;font-size:11px;color:#3d6c4d;min-height:44px;padding:13px 0 7px;box-sizing:border-box}
+.pairing-capacity-table{overflow:auto;max-width:100%;border:1px solid #d6e3d9;border-radius:7px;background:#fff}.pairing-capacity-table table{width:100%;min-width:500px;border-collapse:collapse}.pairing-capacity-table :is(td,th){padding:10px 12px;font-size:11px;text-align:left;border-bottom:1px solid #e6ede8;color:#42634e}.pairing-capacity-table th{font-weight:700;background:#f7faf7;white-space:normal;letter-spacing:normal;text-transform:none}
+@media(max-width:600px){.pairing-capacity-overview{padding:16px}.pairing-capacity-total small{margin-left:0;width:100%}}

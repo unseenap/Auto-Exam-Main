@@ -10,6 +10,8 @@ final class SeatingPlanXlsx
     private int $blockedStyle=78;
     private int $labelStyle=78;
     private int $layoutHeadingStyle=117;
+    private \DOMDocument $styleDocument;
+    private array $mergedBorderStyles=[];
 
     public function buildRoomLayout(array $room,array $seats): string
     {
@@ -26,8 +28,9 @@ final class SeatingPlanXlsx
     {
         $xml=file_get_contents(BASE_PATH.'/resources/templates/seating/styles.xml');
         $this->blockedStyle=78;$this->labelStyle=78;$this->layoutHeadingStyle=117;
+        $dom=new \DOMDocument();$dom->loadXML($xml);$this->styleDocument=$dom;$this->mergedBorderStyles=[];
         if(!$layoutOnly)return $xml;
-        $dom=new \DOMDocument();$dom->loadXML($xml);$namespace=$dom->documentElement->namespaceURI;
+        $namespace=$dom->documentElement->namespaceURI;
         $fills=$dom->getElementsByTagName('fills')->item(0);$fillId=$fills->getElementsByTagName('fill')->length;
         $fill=$dom->createElementNS($namespace,'fill');$pattern=$dom->createElementNS($namespace,'patternFill');$pattern->setAttribute('patternType','solid');$color=$dom->createElementNS($namespace,'fgColor');$color->setAttribute('rgb','FFE0E4E1');$pattern->appendChild($color);$fill->appendChild($pattern);$fills->appendChild($fill);$fills->setAttribute('count',(string)($fillId+1));
         $xfs=$dom->getElementsByTagName('cellXfs')->item(0);
@@ -50,7 +53,7 @@ final class SeatingPlanXlsx
     public function build(array $document): string
     {
         if(!class_exists(ZipArchive::class))throw new RuntimeException('Excel export requires the PHP zip extension.');
-        $layoutOnly=!empty($document['layout_only']);$styles=$this->workbookStyles($layoutOnly);
+        $layoutOnly=!empty($document['layout_only']);$this->workbookStyles($layoutOnly);
         $sheets=[];$names=[];if(!$layoutOnly){$names[]='Master';$sheets[]=$this->master($document);}
         foreach($document['rooms'] as $room){$base=mb_substr(preg_replace('/[\\\\\/\?\*\[\]:]/u','-',$room['code'])?:'Room',0,27);$name=$base;$i=2;while(in_array(strtolower($name),array_map('strtolower',$names),true))$name=$base.'-'.$i++;$names[]=$name;$sheets[]=$this->room($document['allocation'],$room);}
         $workbookSheets='';$rels='';$overrides='';$defined=$layoutOnly?'':'<definedName name="_xlnm.Print_Titles" localSheetId="0">Master!$1:$4</definedName>';
@@ -62,7 +65,7 @@ final class SeatingPlanXlsx
             $zip->addFromString('_rels/.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
             $zip->addFromString('xl/workbook.xml','<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>'.$workbookSheets.'</sheets><definedNames>'.$defined.'</definedNames></workbook>');
             $zip->addFromString('xl/_rels/workbook.xml.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'.$rels.'<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdTheme" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>');
-            $zip->addFromString('xl/styles.xml',$styles);$zip->addFile(BASE_PATH.'/resources/templates/seating/theme.xml','xl/theme/theme1.xml');
+            $zip->addFromString('xl/styles.xml',$this->styleDocument->saveXML());$zip->addFile(BASE_PATH.'/resources/templates/seating/theme.xml','xl/theme/theme1.xml');
             foreach($sheets as $i=>$sheet){$n=$i+1;$zip->addFromString('xl/worksheets/sheet'.$n.'.xml',$sheet['xml']);if(isset($sheet['drawing'])){$zip->addFromString('xl/drawings/drawing'.$n.'.xml',$sheet['drawing']);$zip->addFromString('xl/worksheets/_rels/sheet'.$n.'.xml.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdDrawing" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing'.$n.'.xml"/></Relationships>');}}
             if(!$zip->close())throw new RuntimeException('Cannot finish Excel export.');$bytes=file_get_contents($tmp);if($bytes===false)throw new RuntimeException('Cannot read Excel export.');return $bytes;
         }finally{if(is_file($tmp))unlink($tmp);}
@@ -71,7 +74,51 @@ final class SeatingPlanXlsx
     private function sheet(string $rows,string $cols,array $merges,string $area,int $fitHeight=1): array
     {
         $merged='';foreach($merges as $merge)$merged.='<mergeCell ref="'.$merge.'"/>';
-        return ['area'=>$area,'xml'=>'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><sheetFormatPr defaultRowHeight="19.5"/><cols>'.$cols.'</cols><sheetData>'.$rows.'</sheetData><mergeCells count="'.count($merges).'">'.$merged.'</mergeCells><printOptions horizontalCentered="1"/><pageMargins left="0.16" right="0.16" top="0.22" bottom="0.20" header="0.16" footer="0.16"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="'.$fitHeight.'"/></worksheet>'];
+        $xml='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><sheetFormatPr defaultRowHeight="19.5"/><cols>'.$cols.'</cols><sheetData>'.$rows.'</sheetData><mergeCells count="'.count($merges).'">'.$merged.'</mergeCells><printOptions horizontalCentered="1"/><pageMargins left="0.16" right="0.16" top="0.22" bottom="0.20" header="0.16" footer="0.16"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="'.$fitHeight.'"/></worksheet>';
+        return ['area'=>$area,'xml'=>$this->completeMergedBorders($xml,$merges)];
+    }
+
+    /** Excel needs styled cells along every merged edge, not just the anchor. */
+    private function completeMergedBorders(string $xml,array $merges): string
+    {
+        $dom=new \DOMDocument();$dom->loadXML($xml);$namespace=$dom->documentElement->namespaceURI;
+        $sheetData=$dom->getElementsByTagName('sheetData')->item(0);$rowNodes=[];$cells=[];
+        $number=static function(string $letters):int{$n=0;foreach(str_split($letters) as $letter)$n=$n*26+ord($letter)-64;return $n;};
+        foreach($sheetData->getElementsByTagName('row') as $row){$r=(int)$row->getAttribute('r');$rowNodes[$r]=$row;foreach($row->getElementsByTagName('c') as $cell){preg_match('/^([A-Z]+)\d+$/',$cell->getAttribute('r'),$m);$cells[$r][$number($m[1])]=$cell;}}
+        $xfs=$this->styleDocument->getElementsByTagName('cellXfs')->item(0);
+        $borders=$this->styleDocument->getElementsByTagName('borders')->item(0);
+        foreach($merges as $merge){
+            if(!preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/',$merge,$m))continue;
+            $left=$number($m[1]);$top=(int)$m[2];$right=$number($m[3]);$bottom=(int)$m[4];
+            $anchor=$cells[$top][$left]??null;if(!$anchor)continue;
+            $styleId=(int)$anchor->getAttribute('s');$base=$xfs->getElementsByTagName('xf')->item($styleId);
+            $border=$borders->getElementsByTagName('border')->item((int)$base->getAttribute('borderId'));$fallback=null;
+            foreach(['left','right','top','bottom'] as $side){$edge=$border->getElementsByTagName($side)->item(0);if($edge&&$edge->hasAttribute('style')){$fallback=$edge;break;}}
+            if(!$fallback)continue; // Unbordered titles must remain unbordered.
+            for($r=$top;$r<=$bottom;$r++)for($c=$left;$c<=$right;$c++){
+                $mask=($c===$left?1:0)|($c===$right?2:0)|($r===$top?4:0)|($r===$bottom?8:0);$cache=$styleId.':'.$mask;
+                if(!isset($this->mergedBorderStyles[$cache])){
+                    $newBorder=$this->styleDocument->createElementNS($namespace,'border');
+                    foreach(['left'=>1,'right'=>2,'top'=>4,'bottom'=>8] as $side=>$bit){
+                        $edge=$this->styleDocument->createElementNS($namespace,$side);
+                        if($mask&$bit){$source=$border->getElementsByTagName($side)->item(0);if(!$source||!$source->hasAttribute('style'))$source=$fallback;
+                            foreach($source->attributes as $attribute)$edge->setAttribute($attribute->name,$attribute->value);
+                            foreach($source->childNodes as $child)$edge->appendChild($child->cloneNode(true));
+                        }
+                        $newBorder->appendChild($edge);
+                    }
+                    $borderId=$borders->getElementsByTagName('border')->length;$borders->appendChild($newBorder);$borders->setAttribute('count',(string)($borderId+1));
+                    $xf=$base->cloneNode(true);$xf->setAttribute('borderId',(string)$borderId);$xf->setAttribute('applyBorder','1');
+                    $index=$xfs->getElementsByTagName('xf')->length;$xfs->appendChild($xf);$xfs->setAttribute('count',(string)($index+1));$this->mergedBorderStyles[$cache]=$index;
+                }
+                if(!isset($rowNodes[$r])){$rowNodes[$r]=$dom->createElementNS($namespace,'row');$rowNodes[$r]->setAttribute('r',(string)$r);}
+                if(!isset($cells[$r][$c])){$cells[$r][$c]=$dom->createElementNS($namespace,'c');$cells[$r][$c]->setAttribute('r',$this->col($c).$r);}
+                $cells[$r][$c]->setAttribute('s',(string)$this->mergedBorderStyles[$cache]);
+            }
+        }
+        ksort($rowNodes);
+        foreach($rowNodes as $r=>$row){if(isset($cells[$r])){ksort($cells[$r]);foreach($cells[$r] as $cell)$row->appendChild($cell);}$sheetData->appendChild($row);}
+        return $dom->saveXML();
     }
 
     private function room(array $allocation,array $room): array

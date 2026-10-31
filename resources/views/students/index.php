@@ -1,11 +1,11 @@
 <?php $pageTitle = 'Students'; ?>
 <?php if(app()->auth()->can('academic.manage')):?><p><a class="secondary-button" href="<?= e(url('academic-rollover')) ?>">Academic progression</a></p><?php endif;?>
-<section class="page-heading"><div><p class="eyebrow">Academic records</p><h1>Student directory</h1><p>Search official roll numbers, confirm programme mappings, and identify records requiring manual review.</p></div><div class="heading-actions"><a class="secondary-button" href="<?= e(url('students/import')) ?>">Import file</a><a class="primary-button" href="<?= e(url('students/create')) ?>">Add student</a></div></section>
+<section class="page-heading"><div><p class="eyebrow">Academic records</p><h1>Student directory</h1><p>Search official roll numbers, confirm programme mappings, and identify records requiring manual review.</p></div><div class="heading-actions"><a class="secondary-button" href="<?= e(url('students/bulk-delete')) ?>"><i class="ti ti-trash" aria-hidden="true"></i> Bulk delete</a><a class="secondary-button" href="<?= e(url('students/import')) ?>">Import file</a><a class="primary-button" href="<?= e(url('students/create')) ?>">Add student</a></div></section>
 <?php if ($success): ?><div class="alert success" role="status"><?= e($success) ?></div><?php endif; ?>
 <?php if ($error): ?><div class="alert error" role="alert"><?= e($error) ?></div><?php endif; ?>
 <section class="panel table-panel">
   <form class="filter-bar" id="student-directory-filters" method="get" action="<?= e(url('students')) ?>">
-    <label>Search<input name="search" type="search" value="<?= e($search) ?>" placeholder="Roll number or student name"></label>
+    <label>Search<input name="search" type="search" value="<?= e($search) ?>" placeholder="Roll, enrollment number or name"></label>
     <label>School<select name="school_id" id="student-filter-school"><option value="">All schools</option><?php foreach($schools as $school):?><option value="<?= (int)$school['id'] ?>" <?= $schoolId===(int)$school['id']?'selected':'' ?>><?= e($school['code'].' - '.$school['name']) ?></option><?php endforeach;?></select></label>
     <label>Programme<select name="programme_id" id="student-filter-programme" <?= !$schoolId?'disabled':'' ?>><option value=""><?= $schoolId?'All programmes':'Select school first' ?></option><?php foreach ($programmes as $programme): if((int)$programme['school_id']!==$schoolId)continue; ?><option value="<?= (int) $programme['id'] ?>" <?= $programmeId === (int) $programme['id'] ? 'selected' : '' ?>><?= e($programme['code']) ?> - <?= e($programme['name']) ?></option><?php endforeach; ?></select></label>
     <label>Batch<select name="batch_id" id="student-filter-batch" <?= !$programmeId?'disabled':'' ?>><option value=""><?= $programmeId?'All batches':'Select programme first' ?></option><?php foreach($batches as $batch): if((int)$batch['programme_id']!==$programmeId)continue;?><option value="<?= (int)$batch['id'] ?>" <?= $batchId===(int)$batch['id']?'selected':'' ?>><?= e($batch['label']) ?></option><?php endforeach;?></select></label>
@@ -14,9 +14,10 @@
   </form>
   <div class="table-toolbar"><strong><?= number_format($result['total']) ?> student records</strong><span>Page <?= $result['page'] ?> of <?= $result['pages'] ?></span></div>
   <?php if ($result['items']): ?>
-  <div class="table-scroll"><table><thead><tr><th>Roll / Enrollment</th><th>Student</th><th>Session</th><th>Branch / Department</th><th>Year / Semester</th><th>Contact</th><th>Parsing</th><th>Status</th><th></th></tr></thead><tbody>
+  <div class="table-scroll"><table><thead><tr><th>Roll number</th><th>Enrollment number</th><th>Student</th><th>Session</th><th>Branch / Department</th><th>Year / Semester</th><th>Contact</th><th>Parsing</th><th>Status</th><th></th></tr></thead><tbody>
   <?php foreach ($result['items'] as $student): ?><tr>
-    <td><strong><?= e($student['roll_no_original']) ?></strong><small class="cell-note"><?= e($student['enrollment_number']?:$student['normalized_roll_no']) ?></small></td>
+    <td><strong><?= e($student['roll_no_original']) ?></strong></td>
+    <td><?= e($student['enrollment_number']??'—') ?></td>
     <td><?= e($student['name']) ?><small class="cell-note"><?= e($student['school_name']) ?> | Section <?= e($student['section']) ?></small></td>
     <td><?= e($student['academic_session']) ?><small class="cell-note"><?= e($student['batch_label']?:'Batch not assigned') ?></small></td><td><?= e($student['branch']) ?><small class="cell-note"><?= e($student['department_name']) ?></small></td>
     <td>Year <?= (int)$student['current_year_of_study'] ?><small class="cell-note">Semester <?= (int)$student['semester'] ?></small></td><td><?= e($student['mobile_number']?:'-') ?></td>

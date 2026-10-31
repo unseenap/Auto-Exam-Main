@@ -24,6 +24,14 @@ final class RollNumberParser
             return $this->result($display, $normalizedWithStatus, null, null, null, null, $special, 'invalid', 'Roll number is empty or contains no letters or numbers.');
         }
 
+        // L replaces U in lateral-entry roll numbers; it is an admission route
+        // into the same branch, rather than a separate examination programme.
+        if(preg_match('/^([0-9]+)(L[A-Z]{2})([0-9]+)$/',$normalized,$parts)===1){
+            $regularCode=self::regularProgrammeCode($parts[2]);$regular=$programmes[$regularCode]??null;
+            return $this->result($display,$normalizedWithStatus,$regular?(int)$regular['id']:null,$parts[1],$parts[2],$parts[3],$special,
+                $regular?'verified':'review',$regular?null:'The regular programme '.$regularCode.' is missing for lateral-entry code '.$parts[2].'.','lateral');
+        }
+
         uksort($programmes, static fn(string $a, string $b): int => strlen($b) <=> strlen($a));
         foreach ($programmes as $code => $programme) {
             $position = strpos($normalized, strtoupper($code));
@@ -46,6 +54,11 @@ final class RollNumberParser
 
         return $this->result($display, $normalizedWithStatus, null, null, null, null, $special, 'invalid',
             'The roll number format could not be parsed.');
+    }
+
+    public static function regularProgrammeCode(string $code):string
+    {
+        return preg_match('/^L[A-Z]{2}$/',$code)===1?'U'.substr($code,1):$code;
     }
 
     private function result(string $original, string $normalized, ?int $programmeId, ?string $prefix, ?string $code,

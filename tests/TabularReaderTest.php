@@ -13,6 +13,10 @@ if(!class_exists(ZipArchive::class))throw new RuntimeException('Enable the PHP z
 $reader=new TabularReader();
 $temporary=tempnam(__DIR__,'gbu_xlsx_');
 try{
+    foreach([false,true] as $bom){
+        file_put_contents($temporary,($bom?"\xEF\xBB\xBF":'')."\"Enrollment/Roll Number\",\"Full Name\"\r\n\"235UCS501\",\"Demo Student\"\r\n");
+        checkReader($reader->read($temporary,'csv')===[['Enrollment/Roll Number','Full Name'],['235UCS501','Demo Student']],'Quoted CSV header failed with BOM='.($bom?'yes':'no'));
+    }
     foreach(['default','prefixed','none'] as $style){
         $prefix=$style==='prefixed'?'x:':'';
         $namespace=$style==='none'?'':($style==='prefixed'?' xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"':' xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"');
@@ -27,5 +31,5 @@ try{
         $rows=$reader->read($temporary,'xlsx');
         checkReader($rows===[['Enrollment/Roll Number','Full Name'],['235UCS501','Demo Student','','5','','0000000001']],'XLSX parsing failed for '.$style.' namespace');
     }
-    echo "TabularReader: PASS (default, prefixed and absent namespaces; shared and inline rich text; sparse cells; leading-zero identifiers).\n";
+    echo "TabularReader: PASS (quoted CSV with/without BOM; XLSX namespaces, rich text, sparse cells, leading-zero identifiers).\n";
 }finally{if(is_file($temporary))unlink($temporary);}

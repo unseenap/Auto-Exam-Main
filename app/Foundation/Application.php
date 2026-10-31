@@ -125,6 +125,8 @@ final class Application
 
         if ($path === '/students' && $method === 'POST') return $this->saveStudent($request);
         if ($path === '/students/import/template.csv' && $method === 'GET') return $this->studentImportTemplate();
+        if ($path === '/students/bulk-delete' && $method === 'GET') return $this->studentBulkDelete($request);
+        if (in_array($path,['/students/bulk-delete/preview','/students/bulk-delete/commit'],true) && $method === 'POST') return $this->studentBulkDelete($request);
         if ($path === '/students/import' && $method === 'POST') return $this->stageStudentImport($request);
         if (preg_match('#^/students/import/(\d+)/commit$#', $path, $matches) === 1 && $method === 'POST') {
             return $this->commitStudentImport($request, (int) $matches[1]);
@@ -172,6 +174,7 @@ final class Application
         if(preg_match('#^/date-sheets/(\d+)/automatic/preview$#',$path,$matches)===1&&$method==='POST')return $this->previewAutomaticSchedule($request,(int)$matches[1]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/validate$#',$path,$matches)===1&&$method==='POST')return $this->validateAutomaticSchedule($request,(int)$matches[1]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/generate$#',$path,$matches)===1&&$method==='POST')return $this->generateAutomaticSchedule($request,(int)$matches[1]);
+        if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/delete$#',$path,$matches)===1&&$method==='POST')return $this->deleteDraftDateSheet($request,(int)$matches[1],(int)$matches[2]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/papers/(\d+)/lock$#',$path,$matches)===1&&$method==='POST')return $this->lockAutomaticPaper($request,(int)$matches[1],(int)$matches[2],(int)$matches[3]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/papers/(\d+)/move$#',$path,$matches)===1&&$method==='POST')return $this->moveAutomaticPaper($request,(int)$matches[1],(int)$matches[2],(int)$matches[3]);
         if(preg_match('#^/date-sheets/(\d+)/automatic/runs/(\d+)/regenerate$#',$path,$matches)===1&&$method==='POST')return $this->regenerateAutomaticSchedule($request,(int)$matches[1],(int)$matches[2]);
@@ -327,6 +330,28 @@ final class Application
         return compact('result', 'search', 'schoolId','programmeId', 'batchId', 'schools','programmes','batches')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
+    private function studentBulkDelete(Request $request): Response
+    {
+        $service=new \App\Academic\StudentBulkDeletion($this->database->connection());$key='student_bulk_delete_preview';$actor=(int)$this->auth->user()['id'];
+        if($request->method()==='GET')return Response::html(View::render('students/bulk-delete',['options'=>$service->options(),'review'=>null,'error'=>$this->session->pullFlash('error')]));
+        if(!$this->session->validCsrf((string)$request->input('_token'))){$this->session->flash('error','Your session token expired. Preview the students again.');return Response::redirect(url('students/bulk-delete'));}
+        try{
+            if(str_ends_with($request->path(),'/preview')){
+                $scope=$request->input('scope');$target=$request->input('target','');if(!is_string($scope)||!is_string($target))throw new \RuntimeException('Choose a valid scope and target.');
+                $review=$service->preview($scope,$target);$review['token']=bin2hex(random_bytes(24));
+                $this->session->put($key,['review'=>$review,'actor'=>$actor,'expires'=>time()+900]);
+                return Response::html(View::render('students/bulk-delete',['options'=>$service->options(),'review'=>$review,'error'=>null]));
+            }
+            $saved=$this->session->get($key);$token=$request->input('preview_token');
+            if(!is_array($saved)||$saved['actor']!==$actor||$saved['expires']<time()||!is_string($token)||!hash_equals($saved['review']['token'],$token))throw new \RuntimeException('This deletion preview expired or was replaced. Preview the students again.');
+            $review=$saved['review'];
+            if(!$review['deletable']||$request->input('confirmation')!=='DELETE '.$review['deletable'])throw new \RuntimeException('The confirmation must match the exact text shown in the preview.');
+            $result=$service->delete($review['scope'],$review['target'],$review['ids'],$actor);$this->session->forget($key);
+            $this->session->flash('success',$result['deleted'].' students deleted. '.$result['protected'].' protected students kept. '.$result['changed'].' changed or already removed records skipped.');
+            return Response::redirect(url('students'));
+        }catch(\Throwable $error){$this->session->flash('error',$error instanceof \PDOException?'Deletion could not be completed. No students were deleted; related records may have changed. Preview again.':$error->getMessage());return Response::redirect(url('students/bulk-delete'));}
+    }
+
     private function studentFormData(?int $id = null): array
     {
         $student = $id ? (new StudentRepository($this->database->connection()))->find($id) : null;
@@ -362,6 +387,10 @@ final class Application
         foreach ($this->programmeOptions() as $programme) $programmeMap[$programme['code']] = $programme;
         $parsed = (new RollNumberParser())->parse($input['roll_no_original'], $programmeMap);
         $manualProgrammeId = (int) $request->input('programme_id', 0) ?: null;
+        if($manualProgrammeId&&$parsed['admission_type']==='lateral'){
+            foreach($programmeMap as $code=>$programme)if((int)$programme['id']===$manualProgrammeId&&$code===$parsed['programme_code_detected'])$manualProgrammeId=(int)($parsed['programme_id']??0)?:null;
+            if($manualProgrammeId&&$manualProgrammeId!==$parsed['programme_id'])$errors['programme_id']='Lateral code '.$parsed['programme_code_detected'].' belongs to '.RollNumberParser::regularProgrammeCode($parsed['programme_code_detected']).'. Select that regular programme.';
+        }
         if ($manualProgrammeId) { $parsed['programme_id'] = $manualProgrammeId; $parsed['parsing_status'] = 'verified'; }
         if ($parsed['parsing_status'] === 'invalid') $errors['roll_no_original'] = $parsed['message'];
 
@@ -372,7 +401,7 @@ final class Application
 
         $programmeId=(int)($parsed['programme_id']??0);$batchId=(int)$request->input('batch_id',0)?:null;
         if($batchId){$q=$this->database->connection()->prepare('SELECT COUNT(*) FROM batches WHERE id=:id AND programme_id=:programme');$q->execute(['id'=>$batchId,'programme'=>$programmeId]);if(!(int)$q->fetchColumn()){$this->session->flash('errors',['batch_id'=>'The selected batch does not belong to this programme.']);$this->session->flash('old',array_merge($input,['programme_id'=>$programmeId,'batch_id'=>$batchId]));return Response::redirect($id?url("students/{$id}/edit"):url('students/create'));}}
-        if(!$batchId&&$programmeId)$batchId=$this->findOrCreateStudentBatch($programmeId,(string)($parsed['registration_prefix']??''));
+        if(!$batchId&&$programmeId)$batchId=(new \App\Academic\StudentAdmissionBatch($this->database->connection()))->resolve($programmeId,(string)($parsed['registration_prefix']??''),(string)($parsed['admission_type']??'regular'));
         $payload = array_merge($input, $parsed, ['batch_id' => $batchId]);
         unset($payload['message']);
         $pdo = $this->database->connection();
@@ -415,11 +444,6 @@ final class Application
 
     private function batchOptions(): array
     {return $this->database->connection()->query("SELECT b.*,p.code AS programme_code,p.name AS programme_name,p.school_id FROM batches b JOIN programmes p ON p.id=b.programme_id WHERE b.status<>'inactive' ORDER BY b.start_year DESC,p.code")->fetchAll(PDO::FETCH_ASSOC);}
-
-    private function findOrCreateStudentBatch(int $programmeId,string $prefix): ?int
-    {
-        if(!preg_match('/^(\d{2})/',$prefix,$match))return null;$start=2000+(int)$match[1];$pdo=$this->database->connection();$q=$pdo->prepare('SELECT code,duration_semesters FROM programmes WHERE id=:id');$q->execute(['id'=>$programmeId]);$programme=$q->fetch(PDO::FETCH_ASSOC);if(!$programme)return null;$end=$start+max(1,(int)ceil((int)$programme['duration_semesters']/2));$label=$programme['code'].' '.$start.'-'.$end;$pdo->prepare("INSERT INTO batches(programme_id,label,start_year,end_year,status) VALUES(:programme,:label,:start,:end,'active') ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year)")->execute(['programme'=>$programmeId,'label'=>$label,'start'=>$start,'end'=>$end]);$q=$pdo->prepare('SELECT id FROM batches WHERE programme_id=:programme AND label=:label');$q->execute(['programme'=>$programmeId,'label'=>$label]);return (int)$q->fetchColumn()?:null;
-    }
 
     private function stageStudentImport(Request $request): Response
     {
@@ -469,7 +493,7 @@ final class Application
             $result = (new StudentImportService($pdo))->commit($id, (int) $this->auth->user()['id']);
             $pdo->commit();
             $this->reconcileAcademicRecords('student_import');
-            $this->session->flash('success', $result['created'] . ' student records imported.');
+            $this->session->flash('success', !empty($result['already_committed'])?'This file was already imported ('.$result['created'].' student records). No duplicate students were created.':$result['created'] . ' student records imported.');
             return Response::redirect(url('students'));
         } catch (\Throwable $exception) {
             if ($pdo->inTransaction()) $pdo->rollBack();
@@ -538,7 +562,7 @@ final class Application
     private function roomData(Request $request): array
     {
         $pdo=$this->database->connection();$schoolId=(int)$request->input('school_id',0);
-        $q=$pdo->prepare("SELECT r.*,sc.code AS school_code,sc.name AS school_name,(SELECT COUNT(*) FROM room_seats rs WHERE rs.room_id=r.id AND rs.is_blocked=1) AS blocked_seats FROM rooms r LEFT JOIN schools sc ON sc.id=r.school_id WHERE (?=0 OR r.school_id=?) ORDER BY sc.code,r.priority,r.code");$q->execute([$schoolId,$schoolId]);
+        $q=$pdo->prepare("SELECT r.*,sc.code AS school_code,sc.name AS school_name,sc.status AS school_status,(SELECT COUNT(*) FROM room_seats rs WHERE rs.room_id=r.id AND rs.is_blocked=1) AS blocked_seats,(SELECT COUNT(*) FROM room_seats rs WHERE rs.room_id=r.id AND rs.is_blocked=0) AS unblocked_seats FROM rooms r LEFT JOIN schools sc ON sc.id=r.school_id WHERE (?=0 OR r.school_id=?) ORDER BY sc.code,r.priority,r.code");$q->execute([$schoolId,$schoolId]);
         return ['rooms'=>$q->fetchAll(PDO::FETCH_ASSOC),'schoolId'=>$schoolId,'schools'=>$pdo->query('SELECT id,code,name FROM schools ORDER BY name')->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
@@ -795,7 +819,8 @@ final class Application
             $matrix[$key]['cells'][$paper['exam_date']][]=$paper;
         }
         $schoolNames=array_values(array_unique(array_filter(array_column($papers,'school_name'))));
-        return compact('cycle','dates','papers','matrix','schoolNames')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $q=$pdo->prepare("SELECT sr.id,sr.status,sr.created_at,sr.generated_paper_count,s.name AS school_name FROM scheduling_runs sr JOIN schools s ON s.id=sr.school_id WHERE sr.cycle_id=? AND sr.status IN ('ready','generated','failed','discarded') ORDER BY sr.id DESC");$q->execute([$cycleId]);$draftRuns=$q->fetchAll(PDO::FETCH_ASSOC);
+        return compact('cycle','dates','papers','matrix','schoolNames','draftRuns')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function scheduleData(int $cycleId): array
@@ -822,7 +847,7 @@ final class Application
         $schools=$pdo->query("SELECT id,code,name,short_name FROM schools WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
         $cycleBatchQuery=$pdo->prepare("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year,p.duration_semesters FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=:cycle AND b.status<>'inactive' ORDER BY b.start_year,b.label");$cycleBatchQuery->execute(['cycle'=>$cycleId]);$cycleBatches=$cycleBatchQuery->fetchAll(PDO::FETCH_ASSOC);$regularSemesterScope=[];$currentSemesterMode=BatchProgression::usesCurrentSemester($cycle);if($currentSemesterMode){foreach($cycleBatches as &$cycleBatch){$progress=BatchProgression::calculate($cycle,$cycleBatch,(int)$cycleBatch['duration_semesters'],(new \App\Academic\AcademicRollover($pdo))->calendar());$cycleBatch['study_year']=$progress['study_year'];$cycleBatch['current_semester']=$progress['semester'];$cycleBatch['is_current']=$progress['active'];}unset($cycleBatch);$cycleBatches=array_values(array_filter($cycleBatches,static fn(array $batch):bool=>!empty($batch['is_current'])));$regularSemesterScope=array_values(array_unique(array_map('intval',array_column($cycleBatches,'current_semester'))));sort($regularSemesterScope);}$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatches,'programme_id'))));
         $programmes=$pdo->query("SELECT id,school_id,code,name,duration_semesters FROM programmes WHERE status='active' ORDER BY code")->fetchAll(PDO::FETCH_ASSOC);if($currentSemesterMode||$cycleProgrammeIds)$programmes=array_values(array_filter($programmes,static fn(array $p):bool=>in_array((int)$p['id'],$cycleProgrammeIds,true)));
-        $curriculumQuery=$pdo->prepare("SELECT pc.id,pc.programme_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.subject_priority,c.code,c.name,p.code AS programme_code,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE c.status='active' AND p.status='active' AND (pc.batch_id IN (SELECT batch_id FROM exam_cycle_batches WHERE cycle_id=:cycle) OR pc.batch_id IS NULL) ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code");$curriculumQuery->execute(['cycle'=>$cycleId]);$curriculum=$curriculumQuery->fetchAll(PDO::FETCH_ASSOC);
+        $curriculumQuery=$pdo->prepare("SELECT pc.id,pc.programme_id,pc.batch_id,pc.semester,pc.section,pc.category,pc.subject_priority,c.code,c.name,c.status AS course_status,p.code AS programme_code,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id JOIN programmes p ON p.id=pc.programme_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE p.status='active' AND (pc.batch_id IN (SELECT batch_id FROM exam_cycle_batches WHERE cycle_id=:cycle) OR pc.batch_id IS NULL) ORDER BY p.code,b.start_year,pc.semester,pc.section,pc.subject_priority,c.code");$curriculumQuery->execute(['cycle'=>$cycleId]);$curriculum=$curriculumQuery->fetchAll(PDO::FETCH_ASSOC);
         if($currentSemesterMode){$batchScope=[];$programmeSemesters=[];foreach($cycleBatches as $batch){$batchScope[(int)$batch['id']]=(int)$batch['current_semester'];$programmeSemesters[(int)$batch['programme_id']][(int)$batch['current_semester']]=true;}$curriculum=array_values(array_filter($curriculum,static function(array $item)use($batchScope,$programmeSemesters):bool{return $item['batch_id']?(($batchScope[(int)$item['batch_id']]??0)===(int)$item['semester']):isset($programmeSemesters[(int)$item['programme_id']][(int)$item['semester']]);}));}$curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>!\App\Exams\WrittenPaperPolicy::isLab($item['name'])));
         $last=$this->session->pullFlash('validation_result');
         $selection=$this->session->get('automatic_scope_'.$cycleId,[]);
@@ -837,6 +862,7 @@ final class Application
             $selection=['cycle_id'=>$cycleId,'school_id'=>(int)$savedRun['school_id'],'programme_ids'=>$savedProgrammeIds,'batch_ids'=>$savedBatchIds,'semesters'=>$savedSemesters,'programme_course_ids'=>$savedCourseIds,'subject_selection_active'=>1,'minimum_gap_days'=>(int)($snapshot['minimum_gap_days']??1),'maximum_papers_per_day'=>(int)($snapshot['maximum_papers_per_day']??1),'avoid_consecutive_days'=>!empty($snapshot['avoid_consecutive_days'])?1:null,'use_subject_priority'=>!empty($snapshot['use_subject_priority'])?1:null,'restored_run_id'=>(int)$savedRun['id']];
             $this->session->put('automatic_scope_'.$cycleId,$selection);
         }
+        $selectedPaperIds=array_map('intval',$selection['programme_course_ids']??[]);$curriculum=array_values(array_filter($curriculum,static fn(array $paper):bool=>$paper['course_status']==='active'||in_array((int)$paper['id'],$selectedPaperIds,true)));
         return compact('cycle','schools','programmes','curriculum','selection','cycleBatches','regularSemesterScope')+['result'=>$last,'error'=>$this->session->pullFlash('error')];
     }
 
@@ -868,6 +894,18 @@ final class Application
         $pdo=$this->database->connection();$q=$pdo->prepare('SELECT COUNT(*) FROM scheduling_runs WHERE id=:run AND cycle_id=:cycle');$q->execute(['run'=>$runId,'cycle'=>$cycleId]);if((int)$q->fetchColumn()!==1){$this->session->flash('error','The scheduling run does not belong to this cycle.');return Response::redirect(url("date-sheets/{$cycleId}/automatic"));}
         try{$result=(new AutomaticScheduler($pdo))->generate($runId,(int)$this->auth->user()['id']);$this->session->flash('success',"Draft generated: {$result['scheduled']} papers scheduled and {$result['unscheduled']} require review.");return Response::redirect(url("date-sheets/{$cycleId}/automatic/runs/{$runId}"));}
         catch(\Throwable $e){$this->session->flash('error',$e->getMessage());return Response::redirect(url("date-sheets/{$cycleId}/automatic"));}
+    }
+
+    private function deleteDraftDateSheet(Request $request,int $cycleId,int $runId):Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url("date-sheets/{$cycleId}"));
+        try{
+            $result=(new \App\Exams\DraftDateSheetDeletion($this->database->connection()))->delete($cycleId,$runId,(int)$this->auth->user()['id']);
+            $message="Draft #{$runId} deleted with {$result['deleted_papers']} draft papers.";
+            if($result['preserved_shared_papers'])$message.=" {$result['preserved_shared_papers']} papers used by other runs were preserved.";
+            $this->session->flash('success',$message);
+        }catch(\Throwable $e){$this->session->flash('error',$e->getMessage());}
+        return Response::redirect(url("date-sheets/{$cycleId}"));
     }
 
     private function automaticRunData(int $cycleId,int $runId):array

@@ -67,6 +67,10 @@ Student year, semester and session now advance automatically from the academic c
 
 ## Latest updates
 
+- **Bulk student deletion:** open **Students → Bulk delete**, choose school, department, branch/programme, or all students, and review the matched/deletable/protected counts across all pages. Canonical master mappings and exact department/branch names saved on student records are available. A short-lived preview token and typed count confirmation limit deletion to the previewed group. Examination-linked students are retained; deletable students’ dependent progression/history rows follow the existing cascade policy. Successful deletions are audited and failures roll back.
+
+- **Seat availability:** the Rooms directory shows available seats per room and for the currently filtered list, excluding blocked seats, inactive/maintenance rooms, and unavailable or unassigned schools. The seating generator scopes capacity to the selected session’s schools and shows room-wise available seats, planned allocation, and seats deliberately reserved for spacing.
+
 - **Current pairing rule:** automatic pairing uses different branches within the same school, regardless of batch or year. Same-branch students never sit side by side. A shared course or course code on the exam day still blocks pairing. Alternating-column seating is the default fallback for a single branch or other unmatched groups; partner columns stay empty. Earlier saved plans retain their saved policy until regenerated.
 
 - **No-pair fallback:** **Groups without a pair → Alternate columns · partner stays empty** is the default. Multiple unmatched groups can be seated without a valid year/branch/paper partner, using one usable column per empty column pair. Existing paired columns are preserved. The preview reports reserved columns, and saved-plan validation prevents filling them. Capacity shortages remain visible for review.
@@ -328,6 +332,10 @@ Enrollment/Roll Number, Enrollment Number, Academic Session, Full Name,
 Branch, Mobile Number, Address, Department, School,
 Current Year of Study, Current Semester, Section
 ```
+
+Mobile Number and Address may be blank or their columns omitted. A supplied mobile number must still be valid. Enter `Passout` (also accepts `Pass Out` or `Pass-Out`, case-insensitive) in year or semester to import a completed student with `pass_out` special status; the other field may be blank. For a mapped programme, the final programme year and semester are stored. Completed students remain completed during academic progression.
+
+Lateral-entry roll codes replace `U` with `L`: `LCS` belongs to `UCS`, `LAI` to `UAI`, and likewise for other regular branches. Keep the original roll number and record the admission type as lateral, while using the regular programme for curriculum, exams and seating. The first two digits identify admission year: `235LCS001` was admitted in 2023 into second year of the regular UCS 2022–2026 class, alongside students with `225UCS…` rolls. Batch assignment subtracts one year for lateral admission and reuses that regular class, including batches with custom labels. Separate lateral programme entries are not required.
 
 ### Curriculum
 

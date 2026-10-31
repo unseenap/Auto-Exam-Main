@@ -1,0 +1,14 @@
+.automatic-planner .scheduler-selection-issue{--issue-color:#b33e36;--issue-background:#fff1ef;outline:2px solid var(--issue-color)!important;outline-offset:3px;border-radius:8px;scroll-margin:120px 0 40px}
+.automatic-planner .scheduler-selection-issue[data-validation-severity=warning]{--issue-color:#9b6a1c;--issue-background:#fff8e9}
+.automatic-planner .scheduler-selection-issue::after{content:attr(data-validation-label);display:block;grid-column:1/-1;padding:6px 9px;color:var(--issue-color);background:var(--issue-background);font-size:11px;font-weight:700;line-height:1.5;letter-spacing:normal;text-transform:none;border-radius:0 0 6px 6px}
+.automatic-planner .scheduler-selection-issue>input+.semester-option,.automatic-planner .scheduler-selection-issue>input+span,.automatic-planner .scheduler-selection-issue>select,.automatic-planner .scheduler-selection-issue>input:not([type=checkbox]){border-color:var(--issue-color)!important;background:var(--issue-background)!important}
+.automatic-planner .scheduler-selection-issue>header{background:var(--issue-background)!important}
+.automatic-planner .scheduler-selection-issue input[type=checkbox]{accent-color:var(--issue-color)}
+.automatic-planner .subject-choice-list label.scheduler-selection-issue{flex-wrap:wrap}
+.automatic-planner .subject-choice-list label.scheduler-selection-issue::after{flex-basis:100%;margin-top:6px}
+.automatic-planner .validation-check .scheduler-show-selection{display:inline-flex;align-items:center;min-height:36px;margin-top:8px;padding:7px 10px;border:1px solid currentColor;border-radius:6px;background:#fff;color:#963a31;font:inherit;font-size:11px;font-weight:700;cursor:pointer}
+.automatic-planner .validation-check.warning .scheduler-show-selection{color:#92651e}
+.automatic-planner .scheduler-show-selection:hover{background:#f8f0e9}
+.automatic-planner .scheduler-show-selection:focus-visible{outline:3px solid #bb933e;outline-offset:3px}
+.automatic-planner .scheduler-heading-meta .scheduler-selection-issue{padding:4px 8px}
+.automatic-planner .scheduler-heading-meta .scheduler-selection-issue::after{font-size:10px;padding:2px 0;background:transparent}

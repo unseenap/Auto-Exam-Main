@@ -3,6 +3,7 @@
 <section class="panel quick-form">
 <div class="alert error" role="alert">Permanent deletion. Recovery requires a database backup. No records are removed until both confirmation steps are completed.</div>
 <?php if($preview['cycle']['status']==='published'):?><div class="alert error">You are deleting a published date sheet and its entire examination cycle, not just unpublishing it. Previously downloaded or printed copies will not be recalled.</div><?php endif;?>
+<?php if($preview['cycle']['status']==='draft'&&($preview['counts']['Approved / published scheduling runs']??0)>0):?><div class="alert error">This cycle has an approved date sheet that has not been published. As an administrator, you can permanently delete the cycle, its approved scheduling runs and their draft papers after both confirmations.</div><?php endif;?>
 <h2>Records that will be removed</h2><ul><?php foreach($preview['counts'] as $label=>$count):?><li><?= e($label) ?>: <?= (int)$count ?></li><?php endforeach;?></ul>
 <p>This also removes their cohort links, eligibility, draft seat assignments, scheduling rules/conflicts and shift-specific faculty availability. Students, courses, faculty, rooms and audit history are retained.</p>
 <?php if($step===1):?>

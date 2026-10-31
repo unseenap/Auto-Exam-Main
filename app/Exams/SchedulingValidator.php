@@ -23,10 +23,14 @@ final class SchedulingValidator
         $cycle=$this->row('SELECT * FROM exam_cycles WHERE id=:id',['id'=>$cycleId]);if(!$cycle)throw new RuntimeException('Examination cycle not found.');
         $marks=implode(',',array_fill(0,count($programmeIds),'?'));$programmes=$this->query("SELECT id,code,name,school_id,duration_semesters FROM programmes WHERE id IN ({$marks}) AND status='active'",$programmeIds);
         $checks=[];$add=static function(string $group,string $state,string $code,string $message,array $details=[])use(&$checks):void{$checks[]=compact('group','state','code','message','details');};
+        $programmeCodes=array_column($programmes,'code','id');
+        $paperLabels=static function(array $papers)use($programmeCodes):string{
+            return implode('; ',array_map(static fn(array $paper):string=>$paper['code'].' — '.$paper['name'].' ('.($programmeCodes[$paper['programme_id']]??'Branch #'.$paper['programme_id']).', '.($paper['batch_label']?:'All batches').', Semester '.$paper['semester'].', Section '.$paper['section'].')',array_values($papers)));
+        };
         $academicCalendar=(new \App\Academic\AcademicRollover($this->pdo))->calendar();
         if(BatchProgression::usesCurrentSemester($cycle)){
             $period=$academicCalendar->period($cycle['start_date']);preg_match('/^(\d{4})/',$cycle['academic_year'],$sessionMatch);
-            if((int)($sessionMatch[1]??0)!==$period['session_start_year'])$add('Academic','blocked','cycle.academic_session','The cycle academic year must match '.$period['academic_session'].' for its start date. Review Academic progression before generating.');
+            if((int)($sessionMatch[1]??0)!==$period['session_start_year'])$add('Academic','warning','cycle.academic_session','The calendar places this start date in '.$period['academic_session'].'. Scheduling will use the cycle’s selected academic year '.$cycle['academic_year'].' for batch and semester calculations. This does not block generation.');
         }
         if(count($programmes)!==count($programmeIds)||array_filter($programmes,static fn(array $p):bool=>(int)$p['school_id']!==$schoolId))$add('Academic','blocked','scope.programmes','One or more selected programmes do not belong to the selected school.');else $add('Academic','pass','scope.programmes',count($programmes).' selected programmes belong to this school.');
         $cycleBatchRows=$this->query("SELECT b.id,b.programme_id,b.label,b.start_year,b.end_year,p.duration_semesters FROM exam_cycle_batches ecb JOIN batches b ON b.id=ecb.batch_id JOIN programmes p ON p.id=b.programme_id WHERE ecb.cycle_id=? AND b.status<>'inactive'",[$cycleId]);$batchSemesters=[];$completedBatchIds=[];if(BatchProgression::usesCurrentSemester($cycle)){foreach($cycleBatchRows as &$batch){$progress=BatchProgression::calculate($cycle,$batch,(int)$batch['duration_semesters'],(new \App\Academic\AcademicRollover($this->pdo))->calendar());$batch['current_semester']=$progress['semester'];$batch['study_year']=$progress['study_year'];if($progress['active'])$batchSemesters[(int)$batch['id']]=$progress['semester'];else $completedBatchIds[]=(int)$batch['id'];}unset($batch);}$cycleProgrammeIds=array_values(array_unique(array_map('intval',array_column($cycleBatchRows,'programme_id'))));$outsideBatches=array_diff($programmeIds,$cycleProgrammeIds);
@@ -45,7 +49,11 @@ final class SchedulingValidator
         $selectedCourseIds=array_values(array_unique(array_filter(array_map('intval',$scope['programme_course_ids']??[]))));
         if(!empty($scope['subject_selection_active'])){
             $availableIds=array_map('intval',array_column($curriculum,'id'));$invalidIds=array_diff($selectedCourseIds,$availableIds);
-            if($invalidIds)$add('Academic','blocked','curriculum.selection_invalid','One or more selected subjects do not belong to the selected branch and semester scope. Refresh the page and select again.');
+            if($invalidIds){
+                $invalidPapers=$this->query('SELECT pc.id,pc.programme_id,pc.semester,pc.section,c.code,c.name,b.label AS batch_label FROM programme_courses pc JOIN courses c ON c.id=pc.course_id LEFT JOIN batches b ON b.id=pc.batch_id WHERE pc.id IN ('.implode(',',array_fill(0,count($invalidIds),'?')).')',array_values($invalidIds));
+                $removed=array_diff($invalidIds,array_column($invalidPapers,'id'));$labels=$paperLabels($invalidPapers);if($removed)$labels.=($labels?'; ':'').'Removed subject selection IDs: '.implode(', ',$removed);
+                $add('Academic','blocked','curriculum.selection_invalid','These subjects are outside the selected branch, batch or semester, or unavailable: '.$labels.'. Refresh the page and select again.');
+            }
             $curriculum=array_values(array_filter($curriculum,static fn(array $item):bool=>in_array((int)$item['id'],$selectedCourseIds,true)));
             if(!$selectedCourseIds)$add('Academic','blocked','curriculum.selection_empty','Select at least one written subject for automatic scheduling.');
         }
@@ -53,11 +61,16 @@ final class SchedulingValidator
         $targets=$selectedBatches?:array_map(static fn(int $programmeId):array=>['id'=>null,'programme_id'=>$programmeId,'label'=>(string)$programmeId],$programmeIds);foreach($targets as $batch){$targetSemesters=isset($batch['id'],$selectedBatchSemesters[(int)$batch['id']])?[(int)$selectedBatchSemesters[(int)$batch['id']]]:$semesters;foreach($targetSemesters as $semester){$sections=[];foreach($curriculum as $item)if((int)$item['programme_id']===(int)$batch['programme_id']&&(int)$item['semester']===$semester&&(!$item['batch_id']||(int)$item['batch_id']===(int)$batch['id']))$sections[]=$item['section'];$sections=array_values(array_unique($sections?:['ALL']));foreach($sections as $section)$expected[$batch['label'].'-semester-'.$semester.'-section-'.$section]=0;}}
         foreach($curriculum as $item){if($item['batch_id']){$key=($item['batch_label']?:$item['programme_id']).'-semester-'.$item['semester'].'-section-'.$item['section'];if(array_key_exists($key,$expected))$expected[$key]++;continue;}foreach($batchesByProgramme[(int)$item['programme_id']]??[['label'=>$item['programme_id']]] as $batch){$key=$batch['label'].'-semester-'.$item['semester'].'-section-'.$item['section'];if(array_key_exists($key,$expected))$expected[$key]++;}}
         $missing=array_keys(array_filter($expected,static fn(int $count):bool=>$count===0));
-        $missing?$add('Academic','blocked','curriculum.missing','Written (non-lab) curriculum subjects are missing for '.count($missing).' selected batch-semester combinations.',['combinations'=>$missing]):$add('Academic','pass','curriculum.complete',count($curriculum).' batch curriculum papers are ready for scheduling.');
+        $missingLabels=array_map(static function(string $key)use($programmeCodes):string{
+            $label=str_replace(['-semester-','-section-'],[' · Semester ',' · Section '],$key);
+            foreach($programmeCodes as $id=>$code)if(str_starts_with($key,$id.'-semester-'))return $code.substr($label,strlen((string)$id));
+            return $label;
+        },$missing);
+        $missing?$add('Academic','blocked','curriculum.missing','No written (non-lab) subjects are assigned or selected for: '.implode('; ',$missingLabels).'. Assign the batch curriculum or select its available subjects.',['combinations'=>$missing]):$add('Academic','pass','curriculum.complete',count($curriculum).' batch curriculum papers are ready for scheduling.');
         $registrationPapers=array_filter($curriculum,static fn(array $item):bool=>$item['category']==='back_paper');if($registrationPapers)$add('Academic','warning','registration.required','Back-paper registrations must be confirmed after scheduling. Department-assigned electives cover the whole selected batch, semester and section.');
         $invalidPriority=array_filter($curriculum,static fn(array $item):bool=>(int)$item['subject_priority']<1||(int)$item['subject_priority']>100);
-        $invalidPriority?$add('Academic','blocked','priority.invalid','Some subjects have an invalid scheduling priority.'):$add('Academic','pass','priority.valid','All selected subjects have priorities from 1 to 100.');
-        $inactive=array_filter($curriculum,static fn(array $item):bool=>$item['status']!=='active');$inactive?$add('Academic','blocked','courses.inactive',count($inactive).' selected curriculum subjects are inactive.'):$add('Academic','pass','courses.active','All selected curriculum subjects are active.');
+        $invalidPriority?$add('Academic','blocked','priority.invalid','Invalid scheduling priority (use 1–100): '.$paperLabels($invalidPriority).'.'):$add('Academic','pass','priority.valid','All selected subjects have priorities from 1 to 100.');
+        $inactive=array_filter($curriculum,static fn(array $item):bool=>$item['status']!=='active');$inactive?$add('Academic','blocked','courses.inactive','Inactive subjects: '.$paperLabels($inactive).'.'):$add('Academic','pass','courses.active','All selected curriculum subjects are active.');
         $examDays=(int)$this->value('SELECT COUNT(*) FROM exam_calendar_dates WHERE cycle_id=:cycle AND is_exam_day=1',['cycle'=>$cycleId]);$shifts=(int)$this->value('SELECT COUNT(*) FROM exam_shifts WHERE cycle_id=:cycle',['cycle'=>$cycleId]);
         $examDays>0?$add('Calendar','pass','calendar.days',"{$examDays} enabled examination days are available."):$add('Calendar','blocked','calendar.days','No examination days remain after exclusions.');
         $shifts>0?$add('Calendar','pass','calendar.shifts',"{$shifts} examination shifts are configured."):$add('Calendar','blocked','calendar.shifts','This cycle has no examination shifts.');
@@ -70,6 +83,29 @@ final class SchedulingValidator
         if($minimumGap===0)$gapSlots*=min($shifts,$maximumPerDay);
         $gapSlots>=$largest?$add('Feasibility','pass','gap.window','Enabled dates can accommodate every paper with the requested rest gap.'):$add('Feasibility','warning','gap.window',"Only {$gapSlots} fully separated positions are available for {$largest} papers. The scheduler will preserve as many gaps as possible for higher-priority subjects, then use consecutive working days so no valid paper is omitted.");
         $existing=(int)$this->value("SELECT COUNT(*) FROM examinations WHERE cycle_id=:cycle AND status<>'cancelled'",['cycle'=>$cycleId]);if($existing)$add('Feasibility','warning','papers.existing',"{$existing} examination records already exist and will be preserved. New branches still receive separate date-sheet rows; different branches may use the same date and shift.");else $add('Feasibility','pass','papers.existing','No existing papers need to be preserved. Each selected branch will receive its own date-sheet row.');
+        // Expose exact selection IDs so readiness checks can point to their cause.
+        foreach($checks as &$check){
+            if($check['state']==='pass')continue;
+            $details=[];
+            switch($check['code']){
+                case 'scope.programmes':
+                    $valid=array_map('intval',array_column(array_filter($programmes,static fn(array $p):bool=>(int)$p['school_id']===$schoolId),'id'));
+                    $details['programme_ids']=array_values(array_diff($programmeIds,$valid));break;
+                case 'scope.batches':
+                    $details['batch_ids']=array_values($invalidBatchIds?:$requestedBatchIds);$details['programme_ids']=array_values($outsideBatches);break;
+                case 'scope.completed_batches':$details['batch_ids']=array_values($selectedCompleted);break;
+                case 'scope.batch_programmes':$details['batch_ids']=array_values(array_diff($requestedBatchIds,$selectedBatchIds));break;
+                case 'curriculum.selection_invalid':$details['programme_course_ids']=array_values($invalidIds??[]);break;
+                case 'priority.invalid':$details['programme_course_ids']=array_map('intval',array_column($invalidPriority,'id'));break;
+                case 'courses.inactive':$details['programme_course_ids']=array_map('intval',array_column($inactive,'id'));break;
+                case 'registration.required':$details['programme_course_ids']=array_map('intval',array_column($registrationPapers,'id'));break;
+                case 'curriculum.missing':
+                    foreach($targets as $target)foreach($missing as $combination)if(str_starts_with($combination,$target['label'].'-semester-')){
+                        if(!empty($target['id']))$details['batch_ids'][]=(int)$target['id'];else $details['programme_ids'][]=(int)$target['programme_id'];break;
+                    }break;
+            }
+            $check['details']=array_merge($check['details'],$details);
+        }unset($check);
         $blocked=count(array_filter($checks,static fn(array $check):bool=>$check['state']==='blocked'));$warnings=count(array_filter($checks,static fn(array $check):bool=>$check['state']==='warning'));$status=$blocked?'failed':'ready';
         $snapshot=['programme_ids'=>$programmeIds,'batch_ids'=>$selectedBatchIds,'semesters'=>$semesters,'batch_semesters'=>$selectedBatchSemesters,'programme_course_ids'=>array_map('intval',array_column($curriculum,'id')),'subject_selection_active'=>!empty($scope['subject_selection_active']),'minimum_gap_days'=>$minimumGap,'maximum_papers_per_day'=>$maximumPerDay,'avoid_consecutive_days'=>!empty($scope['avoid_consecutive_days']),'use_subject_priority'=>!empty($scope['use_subject_priority'])];
         $runId=null;

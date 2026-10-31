@@ -15,7 +15,7 @@ const reservePairs=(groups,pairs)=>{
  return {steps,remaining};
 };
 const previewAllocation=(groups,rooms,seats,pairs,solo,alternate=false)=>{
- const reservation=reservePairs(groups,pairs),used=new Set(),roomUsed=new Set(),slots={},neighbours={},occupied={};
+ const reservation=reservePairs(groups,pairs),used=new Set(),roomUsed=new Set(),slots={},neighbours={},occupied={},roomAssigned={};
  const missing=Object.fromEntries(groups.map(g=>[g.key,Number(g.count)]));
  const key=(id,s)=>[id,s[0],s[1]].join(':');
  const connect=(a,b)=>{(neighbours[a]??=new Set()).add(b);(neighbours[b]??=new Set()).add(a);};
@@ -28,7 +28,7 @@ const previewAllocation=(groups,rooms,seats,pairs,solo,alternate=false)=>{
   for(const s of pool)if(s[1]!==aisle){const other=key(r.id,[s[0],s[1]+1]);if(positions.has(other))connect(key(r.id,s),other);}
  }
  const safe=(g,id,s)=>[...(neighbours[key(id,s)]||[])].every(n=>!occupied[n]||compatible(groups.find(x=>x.key===g),occupied[n]));
- const place=(g,id,s)=>{used.add(key(id,s));occupied[key(id,s)]=groups.find(x=>x.key===g);roomUsed.add(Number(id));missing[g]--;};
+ const place=(g,id,s)=>{used.add(key(id,s));occupied[key(id,s)]=groups.find(x=>x.key===g);roomUsed.add(Number(id));roomAssigned[id]=(roomAssigned[id]||0)+1;missing[g]--;};
  pairs.forEach((p,i)=>{
   const step=reservation.steps[i];if(!step.valid)return;
   const school=groups.find(g=>g.key===p.left).school_id,available=rooms.filter(r=>Number(r.school_id)===Number(school));
@@ -63,7 +63,8 @@ const previewAllocation=(groups,rooms,seats,pairs,solo,alternate=false)=>{
    if(!n)break;if(used.has(key(r.id,s))||!safe(g.key,r.id,s))continue;place(g.key,r.id,s);n--;
   }
  }
- return {assigned:used.size,rooms:roomUsed.size,missing,reservation,emptyPartnerColumns};
+ const reservedByRoom=Object.fromEntries(rooms.map(r=>[r.id,(seats[r.id]||[]).filter(s=>emptyPartnerColumns[r.id]?.has(s[1])).length]));
+ return {assigned:used.size,rooms:roomUsed.size,missing,reservation,emptyPartnerColumns,roomAssigned,reservedByRoom};
 };
 // Suggest balanced pairs within each school, always carrying surplus students forward.
 const suggestPairs=(groups,existing=[])=>{
@@ -137,7 +138,7 @@ const render=()=>{
    choices.append(el('p','Selected rooms are tried first. Shared rooms and other rooms in this school are available automatically; lower saved room priority numbers come first.'));
    for(const r of data.rooms.filter(r=>Number(r.school_id)===Number(a.school_id)&&(data.seats[r.id]||[]).length)){
     const label=el('label'),check=el('input');check.type='checkbox';check.dataset.focusKey=p.id+'-room-'+r.id;check.checked=p.rooms.includes(Number(r.id));
-    label.append(check,el('span',r.code+' · '+r.school_code+' · '+data.seats[r.id].length+' seats · saved priority '+r.priority));
+    label.append(check,el('span',r.code+' · '+r.school_code+' · '+data.seats[r.id].length+' available seats · saved priority '+r.priority));
     check.addEventListener('change',()=>{undoPairs=null;status.textContent='';p.rooms=check.checked?[...p.rooms,Number(r.id)]:p.rooms.filter(id=>id!==Number(r.id));render();});choices.append(label);
    }
   }
@@ -150,6 +151,15 @@ const render=()=>{
  });
  document.getElementById('pairings-empty').hidden=pairs.length>0;
  const result=previewAllocation(groups(),data.rooms,data.seats,pairs,solo.value==='1',solo.value==='2'),required=groups().reduce((n,g)=>n+Number(g.count),0);
+ const schools=new Set(groups().map(g=>Number(g.school_id))),availableRooms=data.rooms.filter(r=>!session.value||schools.has(Number(r.school_id)));
+ const available=availableRooms.reduce((n,r)=>n+(data.seats[r.id]||[]).length,0),reserved=availableRooms.reduce((n,r)=>n+(result.reservedByRoom[r.id]||0),0);
+ document.getElementById('available-seat-total').textContent=available.toLocaleString();
+ document.getElementById('available-room-total').textContent=availableRooms.length+' active rooms';
+ document.getElementById('preview-available-seats').textContent=available.toLocaleString();document.getElementById('preview-reserved-seats').textContent=reserved.toLocaleString();
+ document.getElementById('availability-scope').textContent=session.value?'For the selected session’s schools. Blocked seats excluded; spacing and pairing rules can reduce allocation.':'Across active schools. Select a session to see its available rooms and seats.';
+ const capacityBody=document.getElementById('room-capacity-rows');capacityBody.replaceChildren();
+ for(const r of availableRooms){const row=el('tr');for(const value of [r.code,r.school_code,(data.seats[r.id]||[]).length,result.roomAssigned[r.id]||0,result.reservedByRoom[r.id]||0])row.append(el('td',String(value)));capacityBody.append(row);}
+ if(!availableRooms.length){const row=el('tr'),cell=el('td','No active rooms available for this session.');cell.colSpan=5;row.append(cell);capacityBody.append(row);}
  document.getElementById('pairing-summary').textContent=result.assigned+' of '+required+' students can be seated in '+result.rooms+' rooms. '+(required-result.assigned)+' unallocated.';
  const percent=required?Math.round(result.assigned/required*100):0;
  document.getElementById('preview-assigned').textContent=result.assigned.toLocaleString();

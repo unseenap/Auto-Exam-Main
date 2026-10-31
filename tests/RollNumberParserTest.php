@@ -31,6 +31,12 @@ foreach ($cases as $index => [$input, $normalized, $code, $sequence, $special, $
     assert($result['special_status'] === $special, "Case {$index}: special status mismatch");
     assert($result['parsing_status'] === $status, "Case {$index}: parsing status mismatch");
 }
+foreach(['235LCS001'=>[1,'LCS'],'235LAI001'=>[2,'LAI'],'R-235LCS002'=>[1,'LCS']] as $roll=>[$id,$code]){
+    $result=$parser->parse($roll,$programmes);
+    assert($result['programme_id']===$id&&$result['programme_code_detected']===$code&&$result['admission_type']==='lateral'&&$result['registration_prefix']==='235','Lateral entry did not map to regular programme');
+    assert($result['normalized_roll_no']===$roll,'Lateral roll identity was changed');
+}
+$unmapped=$parser->parse('235LZZ001',$programmes);assert($unmapped['programme_id']===null&&$unmapped['parsing_status']==='review'&&$unmapped['admission_type']==='lateral','Missing regular lateral programme silently accepted');
 
 echo 'RollNumberParser: ' . count($cases) . " cases passed.\n";
 
