@@ -1,0 +1,2 @@
+<?php $pageTitle='Duty cancelled';?>
+<div class="fp-page"><a href="<?= e(url('faculty-panel/duties')) ?>">← My duties</a><section class="fp-empty"><span class="fp-status">Cancelled / reassigned</span><h1>Room <?= e($duty['room_code']) ?></h1><p><?= e($duty['exam_date'].' · '.$duty['shift_name']) ?></p><p>This duty is no longer active. You cannot access or edit student attendance through this assignment.</p></section></div>

@@ -28,7 +28,7 @@
   <link rel="stylesheet" href="<?= e(url('assets/css/navigation-slider.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/navigation-slider.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/rbac.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/rbac.css'))) ?>">
   <link rel="stylesheet" href="<?= e(url('assets/css/ui-consistency.css?v=' . (string) filemtime(BASE_PATH . '/public/assets/css/ui-consistency.css'))) ?>">
-</head>
+<?php if(str_contains($path,'/faculty-panel')||str_contains($path,'/faculty-operations')):?><link rel="stylesheet" href="<?= e(url('assets/css/faculty-panel.css?v='.(string)filemtime(BASE_PATH.'/public/assets/css/faculty-panel.css'))) ?>"><?php endif;?></head>
 <body class="admin-body">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <aside id="app-sidebar" class="sidebar" aria-label="Primary navigation">
@@ -39,7 +39,7 @@
     </div>
     <nav class="nav-groups">
       <p>Operations</p>
-      <?php if($can('dashboard.view')):?><a aria-label="Dashboard" data-nav-short="DB" class="<?= str_ends_with($path, '/dashboard') ? 'active' : '' ?>" href="<?= e(url('dashboard')) ?>">Dashboard</a><?php endif;?>
+      <?php if(($user['role_code']??'')==='faculty'):?><?php foreach([''=>'Today','/duties'=>'My duties','/attendance'=>'Attendance','/reports'=>'Reports','/profile'=>'Profile'] as $suffix=>$label):?><a class="<?= str_ends_with($path,'/faculty-panel'.$suffix)?'active':'' ?>" href="<?= e(url('faculty-panel'.$suffix)) ?>" aria-label="<?= e($label) ?>" data-nav-short="<?= e(substr($label,0,2)) ?>"><?= e($label) ?></a><?php endforeach;?><?php endif;?><?php if($can('faculty.review')):?><a href="<?= e(url('faculty-operations')) ?>">Faculty requests</a><?php endif;?><?php if($can('dashboard.view')&&($user['role_code']??'')!=='faculty'):?><a aria-label="Dashboard" data-nav-short="DB" class="<?= str_ends_with($path, '/dashboard') ? 'active' : '' ?>" href="<?= e(url('dashboard')) ?>">Dashboard</a><?php endif;?>
       <?php if($can('exams.manage')):?>
       <a aria-label="Exam cycles" data-nav-short="EC" class="<?= str_contains($path, '/exam-cycles') ? 'active' : '' ?>" href="<?= e(url('exam-cycles')) ?>">Exam cycles</a>
       <a aria-label="Date sheets" data-nav-short="DS" class="<?= str_contains($path, '/date-sheets') ? 'active' : '' ?>" href="<?= e(url('exam-cycles')) ?>">Date sheets</a>

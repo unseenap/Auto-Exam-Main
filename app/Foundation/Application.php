@@ -115,6 +115,8 @@ final class Application
         }
         $required=$this->requiredPermission($path);
         if($required!==null&&!$this->auth->can($required))return Response::html(View::render('errors/403'),403);
+        if($path==='/dashboard'&&($this->auth->user()['role_code']??'')==='faculty')return Response::redirect(url('faculty-panel'));
+        if(str_starts_with($path,'/faculty-panel')||str_starts_with($path,'/faculty-operations'))return (new \App\Faculty\FacultyPortalController($this->database->connection()))->handle($request,$path);
 
         // The scheduled task is the primary trigger; signed-in traffic catches
         // up after downtime. Academic administration retains a preview path.
@@ -256,6 +258,8 @@ final class Application
 
     private function requiredPermission(string $path):?string
     {
+        if(str_starts_with($path,'/faculty-panel'))return 'faculty.self';
+        if(str_starts_with($path,'/faculty-operations'))return 'faculty.review';
         if(str_starts_with($path,'/academic-rollover'))return 'academic.manage';
         if($path==='/dashboard')return 'dashboard.view';
         if(str_starts_with($path,'/users'))return 'users.manage';
@@ -1086,12 +1090,16 @@ final class Application
         $q=$pdo->prepare("SELECT a.*,r.code AS room_code,s.roll_no_original,s.name,p.code AS programme_code,rs.seat_label,c.code AS course_code
             FROM attendance a JOIN rooms r ON r.id=a.room_id JOIN students s ON s.id=a.student_id JOIN programmes p ON p.id=s.programme_id
             JOIN seating_assignments sa ON sa.allocation_id=a.allocation_id AND sa.student_id=a.student_id JOIN room_seats rs ON rs.id=sa.seat_id JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id
-            WHERE a.allocation_id=:id ORDER BY r.code,rs.sequence_no");$q->execute(['id'=>$allocationId]);$records=$q->fetchAll(PDO::FETCH_ASSOC);$byRoom=[];foreach($records as $record)$byRoom[$record['room_code']][]=$record;return compact('allocation','records','byRoom')+['success'=>$this->session->pullFlash('success')];
+            WHERE a.allocation_id=:id ORDER BY r.code,rs.sequence_no");$q->execute(['id'=>$allocationId]);$records=$q->fetchAll(PDO::FETCH_ASSOC);$byRoom=[];foreach($records as $record)$byRoom[$record['room_code']][]=$record;\App\Faculty\FacultyPortalMigration::apply($pdo);$roomStates=[];$portal=new \App\Faculty\FacultyPortalService($pdo);foreach($records as $record)$roomStates[(int)$record['room_id']]=$portal->session($allocationId,(int)$record['room_id']);return compact('allocation','records','byRoom','roomStates')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveAttendance(Request $request,int $allocationId): Response
     {
-        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('attendance/'.$allocationId));$statuses=(array)($_POST['status']??[]);$pdo=$this->database->connection();$allowed=['unmarked','present','absent','unfair_means','withheld','other'];$pdo->beginTransaction();try{$q=$pdo->prepare('UPDATE attendance SET status=:status,marked_by=:user,marked_at=NOW() WHERE id=:id AND allocation_id=:allocation');foreach($statuses as $id=>$status)if(in_array($status,$allowed,true))$q->execute(['status'=>$status,'user'=>$this->auth->user()['id'],'id'=>(int)$id,'allocation'=>$allocationId]);$pdo->commit();$this->session->flash('success','Attendance saved.');}catch(\Throwable $e){$pdo->rollBack();throw $e;}return Response::redirect(url('attendance/'.$allocationId));
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('attendance/'.$allocationId));
+        $pdo=$this->database->connection();\App\Faculty\FacultyPortalMigration::apply($pdo);
+        try{(new \App\Faculty\FacultyPortalService($pdo))->coordinatorAttendance((int)$this->auth->user()['id'],$allocationId,(array)$request->input('status',[]),(array)$request->input('revisions',[]),(array)$request->input('remarks',[]));$this->session->flash('success','Attendance saved.');}
+        catch(\App\Faculty\PortalException $e){$this->session->flash('error',$e->getMessage());}
+        return Response::redirect(url('attendance/'.$allocationId));
     }
 
     private function invigilationData(): array
@@ -1121,7 +1129,11 @@ final class Application
 
     private function reviewReplacement(Request $request,int $id,string $decision): Response
     {
-        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('replacements'));$pdo=$this->database->connection();$pdo->beginTransaction();try{$q=$pdo->prepare('SELECT * FROM replacement_requests WHERE id=:id AND status=\'pending\' FOR UPDATE');$q->execute(['id'=>$id]);$r=$q->fetch(PDO::FETCH_ASSOC);if(!$r)throw new \RuntimeException('Request unavailable.');$status=$decision==='approve'?'approved':'rejected';$pdo->prepare('UPDATE replacement_requests SET status=:status,reviewed_by=:user,reviewed_at=NOW() WHERE id=:id')->execute(['status'=>$status,'user'=>$this->auth->user()['id'],'id'=>$id]);if($status==='approved'&&$r['replacement_faculty_id']){$pdo->prepare("UPDATE invigilation_allocations SET faculty_id=:faculty,duty_status='replaced' WHERE id=:id")->execute(['faculty'=>$r['replacement_faculty_id'],'id'=>$r['duty_id']]);}$pdo->commit();$this->session->flash('success','Replacement request '.$status.'.');}catch(\Throwable $e){$pdo->rollBack();$this->session->flash('success',$e->getMessage());}return Response::redirect(url('replacements'));
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('replacements'));
+        $pdo=$this->database->connection();\App\Faculty\FacultyPortalMigration::apply($pdo);
+        try{(new \App\Faculty\FacultyPortalService($pdo))->review((int)$this->auth->user()['id'],'replacement',$id,$decision==='approve',(int)$request->input('replacement_faculty_id')?:null);$this->session->flash('success','Replacement request '.$decision.'d.');}
+        catch(\App\Faculty\PortalException $e){$this->session->flash('success',$e->getMessage());}
+        return Response::redirect(url('replacements'));
     }
 
     private function reportData(): array
@@ -1237,12 +1249,14 @@ final class Application
 
     private function userData():array
     {
+        \App\Faculty\FacultyPortalMigration::apply($this->database->connection());
         $pdo=$this->database->connection();$definitions=RolePolicy::definitions();$roles=$pdo->query('SELECT id,code,name FROM roles ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);foreach($roles as &$role){$role['description']=$definitions[$role['code']]['description']??'';$role['permissions']=RolePolicy::grants($role['code']);}unset($role);
-        return ['users'=>$pdo->query('SELECT u.id,u.username,u.name,u.email,u.status,u.last_login_at,u.created_at,r.id AS role_id,r.code AS role_code,r.name AS role_name FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.name')->fetchAll(PDO::FETCH_ASSOC),'roles'=>$roles,'permissionLabels'=>RolePolicy::permissionLabels(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        return ['users'=>$pdo->query('SELECT u.id,u.username,u.name,u.email,u.status,u.last_login_at,u.created_at,(SELECT fl.faculty_id FROM faculty_user_links fl WHERE fl.user_id=u.id) AS faculty_id,r.id AS role_id,r.code AS role_code,r.name AS role_name FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.name')->fetchAll(PDO::FETCH_ASSOC),'roles'=>$roles,'facultyOptions'=>$pdo->query('SELECT id,employee_id,name FROM faculty WHERE status=\'active\' ORDER BY name')->fetchAll(PDO::FETCH_ASSOC),'permissionLabels'=>RolePolicy::permissionLabels(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveUser(Request $request,?int $id=null):Response
     {
+        \App\Faculty\FacultyPortalMigration::apply($this->database->connection());
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('users'));
         $pdo=$this->database->connection();$username=strtolower(trim((string)$request->input('username')));$name=trim((string)$request->input('name'));$email=trim((string)$request->input('email'))?:null;$roleId=(int)$request->input('role_id');$status=(string)$request->input('status','active');$password=(string)$request->input('password');
         if(!preg_match('/^[a-z0-9._-]{3,80}$/',$username)||$name===''||!in_array($status,['active','inactive','locked'],true)){$this->session->flash('error','Enter a valid username, name, role, and account status.');return Response::redirect(url('users'));}
@@ -1252,6 +1266,7 @@ final class Application
         if($id===(int)($this->auth->user()['id']??0)&&($status!=='active'||$roleCode!=='admin')){$this->session->flash('error','You cannot remove your own administrator access or deactivate your signed-in account.');return Response::redirect(url('users'));}
         try{$pdo->beginTransaction();if($id){$sql='UPDATE users SET role_id=:role,username=:username,name=:name,email=:email,status=:status';$data=['role'=>$roleId,'username'=>$username,'name'=>$name,'email'=>$email,'status'=>$status,'id'=>$id];if($password!==''){if(strlen($password)<12)throw new \RuntimeException('Replacement passwords must contain at least 12 characters.');$sql.=',password_hash=:password';$data['password']=password_hash($password,PASSWORD_DEFAULT);}$sql.=' WHERE id=:id';$pdo->prepare($sql)->execute($data);$action='user.updated';}
             else{$pdo->prepare('INSERT INTO users(role_id,username,name,email,password_hash,status) VALUES(:role,:username,:name,:email,:password,:status)')->execute(['role'=>$roleId,'username'=>$username,'name'=>$name,'email'=>$email,'password'=>password_hash($password,PASSWORD_DEFAULT),'status'=>$status]);$id=(int)$pdo->lastInsertId();$action='user.created';}
+            (new \App\Faculty\FacultyPortalService($pdo))->linkAccount((int)$this->auth->user()['id'],(int)$id,(int)$request->input('faculty_id')?:null);
             $pdo->prepare('INSERT INTO audit_logs(user_id,action,entity_type,entity_id,new_values) VALUES(:user,:action,\'user\',:id,:data)')->execute(['user'=>$this->auth->user()['id'],'action'=>$action,'id'=>$id,'data'=>json_encode(['username'=>$username,'role'=>$roleCode,'status'=>$status])]);$pdo->commit();$this->session->flash('success',$action==='user.created'?'User account created.':'User access updated.');}
         catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('error',str_contains(strtolower($e->getMessage()),'duplicate')?'Username or email already exists.':$e->getMessage());}
         return Response::redirect(url('users'));

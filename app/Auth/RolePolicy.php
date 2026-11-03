@@ -8,11 +8,11 @@ final class RolePolicy
 {
     private const PERMISSIONS = [
         'admin' => ['*'],
-        'examination_controller' => ['dashboard.view','exams.manage','seating.manage','attendance.manage','reports.view'],
+        'examination_controller' => ['dashboard.view','exams.manage','seating.manage','attendance.manage','reports.view','faculty.review'],
         'academic_coordinator' => ['dashboard.view','academic.manage','students.manage','reports.view'],
         'seating_coordinator' => ['dashboard.view','rooms.manage','seating.manage','reports.view'],
-        'invigilation_coordinator' => ['dashboard.view','faculty.manage','invigilation.manage','attendance.manage','reports.view'],
-        'faculty' => ['dashboard.view'],
+        'invigilation_coordinator' => ['dashboard.view','faculty.manage','invigilation.manage','attendance.manage','reports.view','faculty.review'],
+        'faculty' => ['dashboard.view','faculty.self'],
         'auditor' => ['dashboard.view','reports.view','audit.view'],
         'viewer' => ['dashboard.view','reports.view'],
     ];
@@ -38,7 +38,7 @@ final class RolePolicy
 
     public static function permissionLabels():array
     {
-        return ['dashboard.view'=>'Dashboard','academic.manage'=>'Academic masters','students.manage'=>'Students','faculty.manage'=>'Faculty','rooms.manage'=>'Rooms','exams.manage'=>'Exam cycles and date sheets','seating.manage'=>'Seating','attendance.manage'=>'Attendance','invigilation.manage'=>'Invigilation','reports.view'=>'Reports','audit.view'=>'Audit logs','users.manage'=>'Users and roles'];
+        return ['dashboard.view'=>'Dashboard','academic.manage'=>'Academic masters','students.manage'=>'Students','faculty.manage'=>'Faculty','rooms.manage'=>'Rooms','exams.manage'=>'Exam cycles and date sheets','seating.manage'=>'Seating','attendance.manage'=>'Attendance','invigilation.manage'=>'Invigilation','reports.view'=>'Reports','audit.view'=>'Audit logs','users.manage'=>'Users and roles','faculty.self'=>'Personal faculty panel','faculty.review'=>'Faculty requests and submission review'];
     }
 
     public static function grants(string $role):array

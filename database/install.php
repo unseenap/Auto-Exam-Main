@@ -22,6 +22,7 @@ if (!$rolesTableExists) {
     $pdo->exec((string) file_get_contents(__DIR__ . '/schema.sql'));
 }
 $pdo->exec((string) file_get_contents(__DIR__ . '/academic-rollover.sql'));
+$pdo->exec((string) file_get_contents(__DIR__ . '/faculty-portal.sql'));
 require_once $base . '/app/Rooms/RoomSchoolMigration.php';
 App\Rooms\RoomSchoolMigration::apply($pdo);
 $pdo->exec((string) file_get_contents(__DIR__ . '/seed.sql'));
