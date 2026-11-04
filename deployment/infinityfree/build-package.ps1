@@ -40,7 +40,7 @@ if ($schema[0] -notmatch '^CREATE DATABASE') {
 $portableSchema = $schema | Select-Object -Skip 3
 $seed = Get-Content -LiteralPath (Join-Path $projectRoot 'database\seed.sql')
 $tableNames = foreach ($line in $portableSchema) {
-    if ($line -match '^CREATE TABLE\s+`?([A-Za-z0-9_]+)`?') {
+    if ($line -match '^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?`?([A-Za-z0-9_]+)`?') {
         $Matches[1]
     }
 }

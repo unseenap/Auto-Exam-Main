@@ -359,7 +359,7 @@ Each room defines rows, columns and either `row_major` or `column_major` allocat
 
 ## Database design
 
-The current schema contains **41 tables** grouped into these domains:
+The current schema contains **47 tables** grouped into these domains:
 
 | Domain | Principal tables |
 |---|---|
@@ -370,10 +370,13 @@ The current schema contains **41 tables** grouped into these domains:
 | Examination planning | `exam_cycles`, `exam_cycle_batches`, `exam_shifts`, `exam_calendar_dates`, `examinations`, `examination_cohorts`, `exam_eligibility`, `scheduling_rules`, `scheduling_runs`, `scheduling_run_items`, `scheduling_conflicts` |
 | Seating | `seating_allocations`, `seating_assignments`, `seating_unallocated` |
 | Operations | `invigilation_allocations`, `attendance`, `replacement_requests` |
+| Faculty portal | `faculty_user_links`, `faculty_duty_acknowledgments`, `faculty_room_sessions`, `faculty_correction_requests`, `faculty_availability_requests`, `faculty_portal_settings` |
 | Imports | `import_batches`, `import_rows`, `import_errors` |
 | Academic progression | `academic_rollover_settings`, `academic_rollover_runs`, `student_progression_controls`, `student_term_enrollments`, `student_course_registrations`, `student_academic_history` |
 
-The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean local installation: import the schema first and import the seed second. The schema creates and selects `gbu_exam_operations`, then defines all 41 tables, indexes and foreign keys for scheduling, staged `programmes` imports and active/inactive curriculum status. The InfinityFree package builder automatically removes the local database-selection block when generating provider-compatible SQL files.
+The canonical sources are [`database/schema.sql`](database/schema.sql) and [`database/seed.sql`](database/seed.sql). These are the only SQL files required for a clean local installation: import the schema first and import the seed second. The schema creates and selects `gbu_exam_operations`, then defines all 47 tables, indexes and foreign keys, including academic progression and the faculty portal. The InfinityFree package builder automatically removes the local database-selection block when generating provider-compatible SQL files.
+
+The seed retains the 2023 curriculum as a historical baseline. Admission imports create other cohorts from roll admission years; curricula for newer cohorts must be supplied explicitly. Lateral rolls map to regular programmes and the previous year's class, without separate lateral programme seeds. Unverified roll codes require manual programme mapping. Rerunning the seed preserves existing batch statuses, academic calendar settings and faculty attendance windows.
 
 ## Local installation
 

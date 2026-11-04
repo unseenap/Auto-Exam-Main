@@ -1,6 +1,7 @@
 -- Import this file while the target application database is selected.
 -- This repeatable baseline mirrors the current academic structure without operational records.
--- Import after schema.sql. Older installations need academic-rollover.sql and upgrade-room-schools.php first.
+-- Import after schema.sql. Older installations also need the applicable academic,
+-- faculty-portal and room-school upgrades before using current application features.
 -- Rooms are operational records; each requires an explicit schools.id ownership.
 -- No room ownership is inferred from names or reset by this baseline seed.
 -- Student placements, progression controls, registrations, histories and runs
@@ -44,10 +45,11 @@ INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_ent
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'UCA','Bachelor of Computer Applications','undergraduate',6,0,0,'active' FROM schools WHERE code='ICT'
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
-INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'LCS','CSE Lateral Entry','undergraduate',6,1,0,'active' FROM schools WHERE code='ICT'
-ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
-INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'LIT','IT Lateral Entry','undergraduate',6,1,0,'active' FROM schools WHERE code='ICT'
-ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
+-- Lateral rolls (LCS, LAI, LCC, LIT, LEA, etc.) resolve to their regular U-code
+-- programme in RollNumberParser. They join the previous year's admission cohort.
+-- Do not create separate lateral programmes or batches. Existing legacy records
+-- are retained on seed reruns; their reassignment requires an explicit migration.
+-- Unverified source codes such as UCF and PCD are not silently aliased here.
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'PCS','M.Tech Computer Science and Engineering','postgraduate',4,0,0,'active' FROM schools WHERE code='ICT'
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'PCW','M.Tech CSE Working Professional','postgraduate',4,0,0,'active' FROM schools WHERE code='ICT'
@@ -60,8 +62,6 @@ INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_ent
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'UEA','B.Tech ECE Artificial Intelligence and Machine Learning','undergraduate',8,0,0,'active' FROM schools WHERE code='ICT'
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
-INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'LEA','ECE AI and ML Lateral Entry','undergraduate',6,1,0,'active' FROM schools WHERE code='ICT'
-ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'IEC','Integrated Electronics and Communication Engineering','integrated',10,0,1,'active' FROM schools WHERE code='ICT'
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'PAI','M.Tech Artificial Intelligence','postgraduate',4,0,0,'active' FROM schools WHERE code='ICT'
@@ -71,10 +71,13 @@ ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALU
 INSERT INTO programmes (school_id,code,name,level,duration_semesters,lateral_entry,legacy,status) SELECT id,'PSE','M.Tech Software Engineering','postgraduate',4,0,0,'active' FROM schools WHERE code='ICT'
 ON DUPLICATE KEY UPDATE school_id=VALUES(school_id),name=VALUES(name),level=VALUES(level),duration_semesters=VALUES(duration_semesters),lateral_entry=VALUES(lateral_entry),legacy=VALUES(legacy),status=VALUES(status);
 
+-- Historical curriculum baseline only. New admission cohorts are created by
+-- StudentAdmissionBatch from roll admission years, not by duplicating curricula.
+-- Preserve completed/inactive batch status when the baseline is imported again.
 INSERT INTO batches(programme_id,label,start_year,end_year,status)
 SELECT id,CONCAT(code,' 2023-',2023+CEIL(duration_semesters/2)),2023,2023+CEIL(duration_semesters/2),'active'
-FROM programmes WHERE status='active' AND duration_semesters IS NOT NULL
-ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year),status=VALUES(status);
+FROM programmes WHERE status='active' AND lateral_entry=0 AND duration_semesters IS NOT NULL
+ON DUPLICATE KEY UPDATE start_year=VALUES(start_year),end_year=VALUES(end_year);
 
 INSERT INTO courses (code,name,status) VALUES
 ('CA522','Computer Vision Applications','active'),
@@ -676,3 +679,6 @@ ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),value_type=VALUES(va
 -- Preserve an operator's dates, enabled flag and last successful check on reruns.
 INSERT IGNORE INTO academic_rollover_settings(id,enabled,session_start,even_start)
 VALUES(1,1,'07-01','01-01');
+
+-- Preserve configured faculty reporting and attendance windows on seed reruns.
+INSERT IGNORE INTO faculty_portal_settings(id) VALUES(1);
