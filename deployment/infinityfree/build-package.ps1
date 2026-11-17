@@ -1,103 +1,116 @@
+param(
+    [string] $Php = 'php',
+    [string] $OutputDirectory = $PSScriptRoot
+)
+
 $ErrorActionPreference = 'Stop'
-
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$packageRoot = Join-Path $PSScriptRoot 'package'
-$uploadRoot = Join-Path $packageRoot 'UPLOAD_TO_HTDOCS'
-$setupRoot = Join-Path $packageRoot 'SETUP'
-$zipPath = Join-Path $PSScriptRoot 'Exam-Scheduling-Management-System-InfinityFree-Ready.zip'
-
-if (Test-Path -LiteralPath $packageRoot) {
-    $resolvedPackage = (Resolve-Path -LiteralPath $packageRoot).Path
-    if (-not $resolvedPackage.StartsWith($PSScriptRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to clear unexpected path: $resolvedPackage"
-    }
-    Remove-Item -LiteralPath $resolvedPackage -Recurse -Force
+if ($Php -eq 'php' -and -not (Get-Command $Php -ErrorAction SilentlyContinue)) {
+    $Php = 'C:\xampp\php\php.exe'
 }
 
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$outputRoot = (Resolve-Path -LiteralPath $OutputDirectory).Path
+$buildRoot = Join-Path $outputRoot ('infinityfree-build-' + [guid]::NewGuid().ToString('N'))
+$uploadRoot = Join-Path $buildRoot 'htdocs'
+$setupRoot = Join-Path $buildRoot 'setup'
+$uploadName = 'Auto-Exam-InfinityFree-Upload.zip'
+$setupName = 'Auto-Exam-InfinityFree-Setup.zip'
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 New-Item -ItemType Directory -Path $uploadRoot, $setupRoot | Out-Null
 
-foreach ($directory in @('app', 'bootstrap', 'config', 'public', 'resources')) {
-    Copy-Item -LiteralPath (Join-Path $projectRoot $directory) -Destination $uploadRoot -Recurse
-}
+try {
+    foreach ($directory in @('app', 'bootstrap', 'config', 'public', 'resources')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot $directory) -Destination $uploadRoot -Recurse
+    }
 
-foreach ($directory in @('cache', 'exports', 'imports', 'logs', 'sessions')) {
-    $target = Join-Path $uploadRoot "storage\$directory"
-    New-Item -ItemType Directory -Path $target -Force | Out-Null
-    Set-Content -LiteralPath (Join-Path $target '.gitkeep') -Value '' -NoNewline
-}
+    foreach ($directory in @('cache', 'exports', 'imports', 'logs', 'sessions')) {
+        $target = Join-Path $uploadRoot "storage\$directory"
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+    }
 
-Copy-Item -LiteralPath (Join-Path $projectRoot 'storage\demo-data') -Destination (Join-Path $uploadRoot 'storage') -Recurse
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\root.htaccess') -Destination (Join-Path $uploadRoot '.htaccess')
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\public.htaccess') -Destination (Join-Path $uploadRoot 'public\.htaccess') -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\.env.infinityfree') -Destination (Join-Path $uploadRoot '.env')
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'HOSTING-GUIDE.md') -Destination (Join-Path $packageRoot 'HOSTING-GUIDE.md')
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'infinityfree_upgrade_reserved_column.sql') -Destination (Join-Path $setupRoot 'infinityfree_upgrade_reserved_column.sql')
+    $migrationRoot = Join-Path $uploadRoot 'database'
+    New-Item -ItemType Directory -Path $migrationRoot | Out-Null
+    foreach ($migration in @('faculty-portal.sql', 'attendance-ufm.sql')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot "database\$migration") -Destination $migrationRoot
+    }
 
-$schema = Get-Content -LiteralPath (Join-Path $projectRoot 'database\schema.sql')
-if ($schema[0] -notmatch '^CREATE DATABASE') {
-    throw 'database/schema.sql no longer starts with the expected CREATE DATABASE block; review the packaging script.'
-}
-$portableSchema = $schema | Select-Object -Skip 3
-$seed = Get-Content -LiteralPath (Join-Path $projectRoot 'database\seed.sql')
-$tableNames = foreach ($line in $portableSchema) {
-    if ($line -match '^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?`?([A-Za-z0-9_]+)`?') {
-        $Matches[1]
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\root.htaccess') -Destination (Join-Path $uploadRoot '.htaccess')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\public.htaccess') -Destination (Join-Path $uploadRoot 'public\.htaccess') -Force
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'templates\.env.infinityfree') -Destination (Join-Path $uploadRoot '.env')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Destination (Join-Path $setupRoot 'HOSTING-GUIDE.md')
+
+    $schema = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'database\schema.sql'))
+    $databaseHeader = '\ACREATE DATABASE\s+[^;]+;\s*USE\s+[^;]+;\s*'
+    $portableSchema = $schema -replace $databaseHeader, ''
+    if ($portableSchema -eq $schema) {
+        throw 'The schema database-selection header has changed. Review it before packaging.'
+    }
+    $attendance = [System.IO.File]::ReadAllText((Join-Path $migrationRoot 'attendance-ufm.sql'))
+    $seed = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'database\seed.sql'))
+
+    $credentialJson = & $Php -r '$password = bin2hex(random_bytes(16)); echo json_encode([$password, password_hash($password, PASSWORD_BCRYPT)], JSON_THROW_ON_ERROR);'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'PHP could not generate the temporary administrator credentials.'
+    }
+    $password, $passwordHash = $credentialJson | ConvertFrom-Json
+
+    $adminSql = @"
+INSERT INTO users (role_id, username, name, password_hash, status)
+SELECT id, 'admin', 'Examination Cell Administrator', '$passwordHash', 'active'
+FROM roles WHERE code = 'admin';
+"@
+    $sql = @(
+        '-- Auto-Exam fresh install. Select the empty InfinityFree database before importing.',
+        'SET NAMES utf8mb4;',
+        $portableSchema.Trim(),
+        $attendance.Trim(),
+        $seed.Trim(),
+        $adminSql
+    ) -join "`n`n"
+    [System.IO.File]::WriteAllText((Join-Path $setupRoot 'infinityfree_database_import.sql'), $sql, $utf8)
+
+    $credentials = @"
+Auto-Exam temporary administrator
+
+Login path: /login
+Username: admin
+Temporary password: $password
+
+Keep this file local. Change the password after the first sign-in.
+"@
+    [System.IO.File]::WriteAllText((Join-Path $setupRoot 'ADMIN-CREDENTIALS.txt'), $credentials, $utf8)
+
+    Get-ChildItem -LiteralPath $uploadRoot -Recurse -File -Force | ForEach-Object {
+        $limit = switch -Regex ($_.Name) {
+            '^\.htaccess$' { 10000; break }
+            '\.(html?|php|js|css)$' { 1000000; break }
+            default { 10000000 }
+        }
+        if ($_.Length -gt $limit) {
+            throw "File exceeds its InfinityFree size limit: $($_.FullName)"
+        }
+    }
+
+    # Include dotfiles and empty runtime directories, with the htdocs contents at ZIP root.
+    $uploadZip = Join-Path $buildRoot $uploadName
+    $setupZip = Join-Path $buildRoot $setupName
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($uploadRoot, $uploadZip)
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($setupRoot, $setupZip)
+    if ((Get-Item -LiteralPath $uploadZip).Length -gt 10000000) {
+        throw 'The website ZIP exceeds the InfinityFree archive size limit.'
+    }
+
+    foreach ($name in @($uploadName, $setupName)) {
+        $destination = Join-Path $outputRoot $name
+        Move-Item -LiteralPath (Join-Path $buildRoot $name) -Destination $destination -Force
+        Get-Item -LiteralPath $destination | Select-Object FullName, Length
+    }
+} finally {
+    $resolvedBuildRoot = (Resolve-Path -LiteralPath $buildRoot).Path
+    if ([System.IO.Path]::GetDirectoryName($resolvedBuildRoot) -eq $outputRoot) {
+        Remove-Item -LiteralPath $resolvedBuildRoot -Recurse -Force
     }
 }
-$dropStatements = ($tableNames | ForEach-Object { "DROP TABLE IF EXISTS ``$_``;" }) -join "`r`n"
-$adminSql = @'
-
--- Initial hosted administrator. Change this password immediately after first login.
-INSERT INTO users (role_id, username, name, email, password_hash, status)
-SELECT id, 'admin', 'Examination Cell Administrator', NULL,
-       '$2y$10$oxS1CkSCUQDzreemdTsYPerph4BrBNZ7Icp6ogQkBUU1U.a8DIVCa', 'active'
-FROM roles WHERE code = 'admin'
-ON DUPLICATE KEY UPDATE
-  name = VALUES(name),
-  password_hash = VALUES(password_hash),
-  status = 'active';
-'@
-
-$sqlHeader = @'
--- Exam Scheduling and Management System: InfinityFree clean-install database
--- Select the provider-assigned database in phpMyAdmin before importing.
--- Generated from database/schema.sql and database/seed.sql.
-SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS = 0;
-
-'@
-$sqlFooter = "`r`nSET FOREIGN_KEY_CHECKS = 1;`r`n"
-$schemaContent = $sqlHeader + $dropStatements + "`r`n`r`n" + ($portableSchema -join "`r`n") + $sqlFooter
-$seedContent = @'
--- Exam Scheduling and Management System: InfinityFree seed data
--- Import this only after infinityfree_schema.sql, with the assigned database selected.
-SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS = 0;
-
-'@ + ($seed -join "`r`n") + $adminSql + $sqlFooter
-$sqlContent = $sqlHeader + $dropStatements + "`r`n`r`n" + ($portableSchema -join "`r`n") + "`r`n`r`n" + ($seed -join "`r`n") + $adminSql + $sqlFooter
-Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_schema.sql') -Value $schemaContent -Encoding utf8
-Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_seed.sql') -Value $seedContent -Encoding utf8
-Set-Content -LiteralPath (Join-Path $setupRoot 'infinityfree_database_import.sql') -Value $sqlContent -Encoding utf8
-
-$credentials = @'
-Exam Scheduling and Management System — temporary administrator
-
-Login URL: https://YOUR-DOMAIN/login
-Username: admin
-Temporary password: oqiqoz#L2Qo3NbUbgA
-
-Change this password immediately after the first login, then delete this file.
-DO NOT UPLOAD THIS FILE OR THE SETUP FOLDER TO HTDOCS.
-'@
-Set-Content -LiteralPath (Join-Path $setupRoot 'ADMIN-CREDENTIALS.txt') -Value $credentials -Encoding utf8
-
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force
-}
-Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal
-
-$hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
-Write-Output "Package folder: $packageRoot"
-Write-Output "ZIP file: $zipPath"
-Write-Output "SHA256: $hash"

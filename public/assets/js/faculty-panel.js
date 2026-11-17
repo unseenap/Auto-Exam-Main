@@ -11,7 +11,15 @@
   const queue=[],failed=[],base=root.dataset.url,token=document.getElementById('fp-token').value;
   const saveStatus=document.getElementById('fp-save-status'),errorBox=document.getElementById('fp-save-error'),search=document.getElementById('fp-search'),filter=document.getElementById('fp-status-filter');
   const card=id=>document.getElementById('fp-student-'+id);
-  const clean=()=>!working&&!queue.length&&!failed.length&&[...root.querySelectorAll('[data-remarks]')].every(n=>n.value===(records.get(n.closest('[data-record]').dataset.record).remarks||''));
+  const fieldKey=input=>input.dataset.ufmSerial||'remarks';
+  const fields='[data-remarks], [data-ufm-serial]';
+  const clean=()=>!working&&!queue.length&&!failed.length&&[...root.querySelectorAll(fields)].every(n=>n.value===(records.get(n.closest('[data-record]').dataset.record)[fieldKey(n)]||''));
+  const showUfmFields=node=>{node.querySelector('[data-ufm-fields]').hidden=node.querySelector('[data-exception]').value!=='unfair_means';};
+  const syncFields=(node,r)=>{
+    node.querySelectorAll(fields).forEach(input=>input.value=r[fieldKey(input)]||'');
+    node.querySelector('[data-exception]').value=['unfair_means','withheld','other'].includes(r.status)?r.status:'unmarked';
+    showUfmFields(node);
+  };
   const setRevision=value=>{revision=Number(value);root.dataset.revision=String(revision);root.querySelectorAll('input[name="revision"]').forEach(n=>n.value=String(revision));};
   const controls=()=>{
     root.querySelectorAll('.fp-mark-controls').forEach(n=>n.disabled=!editable||conflict);
@@ -49,7 +57,7 @@
     if(!discard&&!clean())return;
     if(discard){queue.length=0;failed.length=0;conflict=false;errorBox.hidden=true;}
     setRevision(data.revision);
-    for(const r of data.records){records.set(String(r.id),r);const node=card(r.id);if(node){node.querySelector('[data-remarks]').value=r.remarks||'';if(['unmarked','unfair_means','withheld','other'].includes(r.status))node.querySelector('[data-exception]').value=r.status;}}
+    for(const r of data.records){records.set(String(r.id),r);const node=card(r.id);if(node)syncFields(node,r);}
     editable=data.state.status!=='submitted'&&data.window.allowed&&root.dataset.dutyCompleted!=='1';
     document.getElementById('fp-submission-status').textContent=data.state.status==='submitted'?'Submitted · locked':(data.revision?'In progress':'Not started');
     saveStatus.textContent=data.state.edited_at?'Last saved '+data.state.edited_at+' by '+data.state.editor_name:'No attendance changes yet';
@@ -62,22 +70,34 @@
       const item=queue.shift();saveStatus.textContent='Saving '+records.get(item.id).roll_no_original+'…';
       try{
         const body=new URLSearchParams({_token:token,record_id:item.id,status:item.status,remarks:item.remarks,revision:String(revision)});
+        Object.entries(item.serials).forEach(([key,value])=>body.set('ufm['+key+']',value));
         const response=await fetch(base+'/mark',{method:'POST',headers:{Accept:'application/json'},body});let data;try{data=await response.json();}catch{throw Error('The server did not confirm this save. Your change is still pending.');}
         if(!response.ok){const e=Error(data.error||'Save failed.');e.conflict=response.status===409||response.status===403;throw e;}
         setRevision(data.revision);const r=records.get(item.id);r.status=item.status;r.remarks=item.remarks;r.marked_at=data.saved_at;r.marked_name='You';
+        for(const key of ['first_copy_serial','second_copy_serial'])r[key]=item.serials[key]||'';
+        const node=card(item.id);
+        if([...node.querySelectorAll(fields)].every(input=>input.value===item.original[fieldKey(input)])&&node.querySelector('[data-exception]').value===item.selection)syncFields(node,r);
         saveStatus.textContent='Saved at '+data.saved_at;render();
       }catch(error){failed.push(item,...queue.splice(0));saveStatus.textContent='Changes not saved';showError(error.message,!!error.conflict);break;}
     }
     working=false;controls();
   };
-  const mark=(id,status,remarks='')=>{
+  const mark=(node,status,quick=false)=>{
     if(!editable||conflict)return;
+    const id=node.dataset.record;
+    const original=Object.fromEntries([...node.querySelectorAll(fields)].map(input=>[fieldKey(input),input.value]));
+    const selection=node.querySelector('[data-exception]').value;
+    const remarks=quick&&records.get(id).status==='unfair_means'?'':original.remarks.trim();
     if(['unfair_means','withheld','other'].includes(status)&&!remarks.trim()){showError('Enter remarks explaining this exceptional attendance status.');return;}
-    queue.push({id:String(id),status,remarks});errorBox.hidden=true;process();
+    const serials=status==='unfair_means'?{first_copy_serial:original.first_copy_serial.trim(),second_copy_serial:original.second_copy_serial.trim()}:{};
+    queue.push({id,status,remarks,serials,original,selection});errorBox.hidden=true;process();
   };
   root.querySelectorAll('[data-record]').forEach(node=>{
-    node.querySelectorAll('[data-mark]').forEach(button=>button.addEventListener('click',()=>mark(node.dataset.record,button.dataset.mark,node.querySelector('[data-remarks]').value)));
-    node.querySelector('[data-save-exception]').addEventListener('click',()=>mark(node.dataset.record,node.querySelector('[data-exception]').value,node.querySelector('[data-remarks]').value));
+    const exception=node.querySelector('[data-exception]');
+    exception.addEventListener('change',()=>showUfmFields(node));
+    node.querySelectorAll(fields).forEach(input=>input.addEventListener('input',controls));
+    node.querySelectorAll('[data-mark]').forEach(button=>button.addEventListener('click',()=>mark(node,button.dataset.mark,true)));
+    node.querySelector('[data-save-exception]').addEventListener('click',()=>mark(node,exception.value));
   });
   document.getElementById('fp-retry').addEventListener('click',()=>{if(conflict)return;queue.unshift(...failed.splice(0));errorBox.hidden=true;process();});
   document.getElementById('fp-reload').addEventListener('click',async()=>{

@@ -16,6 +16,7 @@ const {chromium}=require('playwright');
     if(fail==='conflict'){fail='';model.revision++;model.state.revision=model.revision;return route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Another invigilator updated room IL-202. Reload the latest attendance.'})});}
     assert.equal(Number(data.get('revision')),model.revision,'Wrong revision sent');
     const record=model.records.find(r=>String(r.id)===data.get('record_id'));record.status=data.get('status');record.remarks=data.get('remarks');record.marked_at='2026-11-03 10:01:00';record.marked_name='Dr Aditi Sharma';
+    record.first_copy_serial=data.get('ufm[first_copy_serial]');record.second_copy_serial=data.get('ufm[second_copy_serial]');
     model.revision++;model.state.revision=model.revision;model.state.edited_at=record.marked_at;model.state.editor_name=record.marked_name;
     return route.fulfill({contentType:'application/json',body:JSON.stringify({ok:true,revision:model.revision,saved_at:record.marked_at})});
    }
@@ -43,8 +44,14 @@ const {chromium}=require('playwright');
   await page.locator('#fp-student-1 [data-mark="present"]').click();await page.waitForFunction(()=>document.getElementById('fp-count-present').textContent==='1');assert.equal(await page.locator('#fp-room').getAttribute('data-revision'),'1');
   fail='network';await page.locator('#fp-student-2 [data-mark="absent"]').click();await page.waitForFunction(()=>!document.getElementById('fp-save-error').hidden);assert.equal(await page.locator('#fp-count-absent').innerText(),'0','Unconfirmed change shown as saved');
   await page.locator('#fp-retry').click();await page.waitForFunction(()=>document.getElementById('fp-count-absent').textContent==='1');
-  await page.locator('#fp-student-3 details summary').click();await page.locator('#fp-student-3 [data-exception]').selectOption('withheld');await page.locator('#fp-student-3 [data-save-exception]').click();assert.match(await page.locator('#fp-save-error').innerText(),/remarks/);
-  await page.locator('#fp-student-3 [data-remarks]').fill('Answer book held for review');await page.locator('#fp-student-3 [data-save-exception]').click();await page.waitForFunction(()=>document.getElementById('fp-count-exceptions').textContent==='1');
+  await page.locator('#fp-student-3 details summary').click();await page.locator('#fp-student-3 [data-exception]').selectOption('unfair_means');await page.locator('#fp-student-3 [data-save-exception]').click();assert.match(await page.locator('#fp-save-error').innerText(),/remarks/);
+  await page.locator('#fp-student-3 [data-remarks]').fill('Unauthorized notes found');
+  await page.locator('#fp-student-3 [data-ufm-serial="first_copy_serial"]').fill('00123');
+  await page.locator('#fp-student-3 [data-ufm-serial="second_copy_serial"]').fill('00456');
+  assert.equal(await page.locator('#fp-submit-form button').isDisabled(),true,'Unsaved UFM details did not block submission');
+  await page.locator('#fp-student-3 [data-save-exception]').click();await page.waitForFunction(()=>document.getElementById('fp-count-exceptions').textContent==='1');
+  assert.equal(model.records[2].first_copy_serial,'00123');
+  assert.equal(model.records[2].second_copy_serial,'00456');
   fail='conflict';await page.locator('#fp-student-1 [data-mark="absent"]').click();await page.waitForFunction(()=>!document.getElementById('fp-save-error').hidden);assert.equal(await page.locator('#fp-retry').isVisible(),false);assert.equal(await page.locator('#fp-student-1 [data-mark="present"]').isDisabled(),true);
   page.once('dialog',d=>d.accept());await page.locator('#fp-reload').click();await page.waitForFunction(()=>document.getElementById('fp-save-error').hidden);assert.equal(await page.locator('#fp-count-present').innerText(),'1');
   await page.setViewportSize({width:390,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Room overflow');await page.screenshot({path:path.join(out,'faculty-room-mobile.png'),fullPage:true});

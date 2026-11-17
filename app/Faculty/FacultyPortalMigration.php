@@ -6,7 +6,12 @@ final class FacultyPortalMigration
 {
     public static function apply(PDO $pdo):void
     {
-        if($pdo->query("SHOW TABLES LIKE 'faculty_portal_settings'")->fetchColumn())return;
-        $pdo->exec((string)file_get_contents(dirname(__DIR__,2).'/database/faculty-portal.sql'));
+        $directory=dirname(__DIR__,2).'/database/';
+        if(!$pdo->query("SHOW TABLES LIKE 'faculty_portal_settings'")->fetchColumn()){
+            $pdo->exec((string)file_get_contents($directory.'faculty-portal.sql'));
+        }
+        if(!$pdo->query("SHOW TABLES LIKE 'attendance_ufm'")->fetchColumn()){
+            $pdo->exec((string)file_get_contents($directory.'attendance-ufm.sql'));
+        }
     }
 }

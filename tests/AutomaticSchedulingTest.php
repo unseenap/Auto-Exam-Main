@@ -11,7 +11,35 @@ try{
  assert((int)$pdo->query('SELECT COUNT(*) FROM students')->fetchColumn()===0);
  $pdo->prepare("INSERT INTO exam_cycles(name,academic_year,exam_type,start_date,end_date,default_duration_minutes,status,created_by) VALUES('Scheduler Test','2026-2027','end_sem','2026-12-01','2026-12-06',180,'draft',:user)")->execute(compact('user'));$cycle=(int)$pdo->lastInsertId();$pdo->prepare("INSERT INTO exam_shifts(cycle_id,name,start_time,end_time,duration_minutes,sequence_no) VALUES(:cycle,'Morning','09:30','12:30',180,1)")->execute(compact('cycle'));$shift=(int)$pdo->lastInsertId();$calendar=$pdo->prepare("INSERT INTO exam_calendar_dates(cycle_id,exam_date,is_exam_day,day_type,note) VALUES(:cycle,:date,:enabled,:type,:note)");foreach(['2026-12-01','2026-12-02','2026-12-03','2026-12-04','2026-12-05','2026-12-06'] as $date){$holiday=$date==='2026-12-02';$sunday=$date==='2026-12-06';$calendar->execute(['cycle'=>$cycle,'date'=>$date,'enabled'=>($holiday||$sunday)?0:1,'type'=>$holiday?'holiday':($sunday?'sunday':'exam_day'),'note'=>$holiday?'Test holiday':($sunday?'Sunday':null)]);}
  $scope=['cycle_id'=>$cycle,'school_id'=>$school,'programme_ids'=>[$programme],'semesters'=>[1],'programme_course_ids'=>array_slice($programmeCourseIds,0,2),'subject_selection_active'=>1,'minimum_gap_days'=>1,'maximum_papers_per_day'=>1,'avoid_consecutive_days'=>1,'use_subject_priority'=>1];
- $preview=(new SchedulingValidator($pdo))->validate($scope,$user,false);assert($preview['status']==='ready'&&$preview['run_id']===null);assert((int)$pdo->query('SELECT COUNT(*) FROM scheduling_runs')->fetchColumn()===0);
+ // Duration validation must use the actual clock window, not just the stored duration.
+ $pdo->exec("UPDATE exam_shifts SET end_time='11:00',duration_minutes=180 WHERE id={$shift}");
+ $short=(new SchedulingValidator($pdo))->validate($scope,$user,false);
+ assert($short['status']==='failed');
+ $durationChecks=array_values(array_filter($short['checks'],static fn(array $check):bool=>$check['code']==='calendar.paper_duration'&&$check['state']==='blocked'));
+ assert(count($durationChecks)===1);
+ assert(str_contains($durationChecks[0]['message'],'180 minutes')&&str_contains($durationChecks[0]['message'],'90 usable minutes'));
+ assert($durationChecks[0]['details']['programme_course_ids']===array_slice($programmeCourseIds,0,2));
+ assert(count(array_filter($short['checks'],static fn(array $check):bool=>$check['code']==='calendar.shift_duration_mismatch'))===1);
+ // A lower configured duration also constrains the shift, even when clock times fit.
+ $pdo->exec("UPDATE exam_shifts SET end_time='12:30',duration_minutes=90 WHERE id={$shift}");
+ assert((new SchedulingValidator($pdo))->validate($scope,$user,false)['status']==='failed');
+ // Any suitable shift is enough; short shifts must not block papers that can use a longer one.
+ $pdo->prepare("INSERT INTO exam_shifts(cycle_id,name,start_time,end_time,duration_minutes,sequence_no) VALUES(?,'Afternoon','14:00','17:00',180,2)")->execute([$cycle]);$extraShift=(int)$pdo->lastInsertId();
+ assert((new SchedulingValidator($pdo))->validate($scope,$user,false)['status']==='ready');
+ $pdo->exec("DELETE FROM exam_shifts WHERE id={$extraShift}");
+ $pdo->exec("UPDATE exam_shifts SET duration_minutes=180 WHERE id={$shift}");
+ // If shifts change after saving validation, generation must still explain the precise cause.
+ $stale=(new SchedulingValidator($pdo))->validate($scope,$user);
+ $pdo->exec("UPDATE exam_shifts SET end_time='11:00' WHERE id={$shift}");
+ $staleResult=(new AutomaticScheduler($pdo))->generate($stale['run_id'],$user);
+ assert($staleResult['scheduled']===0&&$staleResult['unscheduled']===2);
+ $reasons=$pdo->query('SELECT reason FROM scheduling_run_items WHERE scheduling_run_id='.(int)$stale['run_id'])->fetchAll(PDO::FETCH_COLUMN);
+ assert(count($reasons)===2&&str_contains($reasons[0],'90 usable minutes'));
+ $message=$pdo->query("SELECT message FROM scheduling_conflicts WHERE conflict_code='generation.no_slot' AND scheduling_run_id=".(int)$stale['run_id']." LIMIT 1")->fetchColumn();
+ assert(str_contains($message,'requires 180 minutes'));
+ $pdo->exec("UPDATE exam_shifts SET end_time='12:30' WHERE id={$shift}");
+ $runsBeforePreview=(int)$pdo->query('SELECT COUNT(*) FROM scheduling_runs')->fetchColumn();
+ $preview=(new SchedulingValidator($pdo))->validate($scope,$user,false);assert($preview['status']==='ready'&&$preview['run_id']===null);assert((int)$pdo->query('SELECT COUNT(*) FROM scheduling_runs')->fetchColumn()===$runsBeforePreview);
 
  $pdo->exec("INSERT INTO courses(code,name,status) VALUES('TS-LAB','Computer Programming Lab','active')");$labId=(int)$pdo->lastInsertId();
  $pdo->prepare("INSERT INTO programme_courses(programme_id,course_id,semester,category,subject_priority) VALUES(?,?,1,'core',1)")->execute([$programme,$labId]);

@@ -6,6 +6,70 @@ namespace App\Export;
 
 final class XlsxExporter
 {
+    public function buildRegister(string $title, array $sheets): string
+    {
+        $count=count($sheets);
+        $files=[
+            '[Content_Types].xml'=>$this->contentTypes(false,$count),
+            '_rels/.rels'=>$this->packageRelationships(),
+            'docProps/app.xml'=>$this->appProperties(),
+            'docProps/core.xml'=>$this->coreProperties($title),
+            'xl/workbook.xml'=>$this->workbook(array_keys($sheets)),
+            'xl/_rels/workbook.xml.rels'=>$this->workbookRelationships($count),
+            'xl/styles.xml'=>$this->styles(),
+        ];
+        $index=0;
+        foreach($sheets as $sheet)$files['xl/worksheets/sheet'.(++$index).'.xml']=$this->registerSheet($sheet);
+        return $this->zip($files);
+    }
+
+    private function registerSheet(array $sheet): string
+    {
+        $title=$sheet['title']??null;
+        $header=$title===null?1:3;
+        $next=$header+1;
+        $last=$this->column(count($sheet['headers']));
+        $xml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            .'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            .'<sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="'.$header.'" topLeftCell="A'.$next.'" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>';
+        foreach($sheet['widths'] as $i=>$width){
+            $column=$i+1;
+            $xml.='<col min="'.$column.'" max="'.$column.'" width="'.$width.'" customWidth="1"/>';
+        }
+        $xml.='</cols><sheetData>';
+        if($title!==null)$xml.='<row r="1" ht="22" customHeight="1">'.$this->cell('A1',$title,9).'</row>';
+        $xml.='<row r="'.$header.'" ht="44" customHeight="1">';
+        foreach($sheet['headers'] as $i=>$label)$xml.=$this->cell($this->column($i+1).$header,$label,$title===null?3:10);
+        $xml.='</row>';
+        foreach($sheet['rows'] as $row){
+            $cells='';
+            $lines=1;
+            foreach($row as $i=>$value){
+                $ref=$this->column($i+1).$next;
+                if($value instanceof \DateTimeImmutable){
+                    $timestamp=$sheet['headers'][$i]==='Timestamp';
+                    $number=(int)$value->format('U')/86400+25569;
+                    $cells.='<c r="'.$ref.'" s="'.($timestamp?12:11).'"><v>'.$number.'</v></c>';
+                }elseif(is_int($value)){
+                    $cells.='<c r="'.$ref.'" s="4"><v>'.$value.'</v></c>';
+                }else{
+                    $value=(string)$value;
+                    $width=max(1,$sheet['widths'][$i]-3);
+                    $wrapped=0;
+                    foreach(explode("\n",$value) as $line)$wrapped+=max(1,(int)ceil(mb_strlen($line)/$width));
+                    $lines=max($lines,$wrapped);
+                    $cells.=$this->cell($ref,$value,4);
+                }
+            }
+            $height=min(408,max(20,15*$lines+6));
+            $xml.='<row r="'.$next.'" ht="'.$height.'" customHeight="1">'.$cells.'</row>';
+            $next++;
+        }
+        $xml.='</sheetData><autoFilter ref="A'.$header.':'.$last.($next-1).'"/>';
+        if($title!==null)$xml.='<mergeCells count="1"><mergeCell ref="A1:'.$last.'2"/></mergeCells>';
+        return $xml.'<pageMargins left="0.2" right="0.2" top="0.3" bottom="0.3" header="0.2" footer="0.2"/><pageSetup orientation="landscape"/></worksheet>';
+    }
+
     public function build(string $title, string $schoolName, string $dateRange, array $headers, array $rows, array $widths = [], ?string $logoPng = null): string
     {
         $files=[
@@ -51,7 +115,7 @@ final class XlsxExporter
 
     private function cell(string $reference,string $value,int $style):string{return '<c r="'.$reference.'" t="inlineStr" s="'.$style.'"><is><t xml:space="preserve">'.$this->xml($value).'</t></is></c>';}
     private function column(int $number):string{$label='';while($number>0){$number--;$label=chr(65+($number%26)).$label;$number=intdiv($number,26);}return $label;}
-    private function xml(string $value):string{return htmlspecialchars($value,ENT_XML1|ENT_QUOTES,'UTF-8');}
+    private function xml(string $value):string{return htmlspecialchars($value,ENT_XML1|ENT_QUOTES|ENT_DISALLOWED|ENT_SUBSTITUTE,'UTF-8');}
     private function zip(array $files):string
     {
         $body='';$directory='';$offset=0;$count=0;
@@ -60,11 +124,28 @@ final class XlsxExporter
             $directory.=pack('VvvvvvvVVVvvvvvVV',0x02014b50,20,20,0,0,0,0,$crc,$size,$size,$nameLength,0,0,0,0,0,$offset).$name;$offset+=strlen($local);$count++;}
         return $body.$directory.pack('VvvvvVVv',0x06054b50,0,0,$count,$count,strlen($directory),strlen($body),0);
     }
-    private function contentTypes(bool $hasLogo):string{$drawing=$hasLogo?'<Default Extension="png" ContentType="image/png"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>':'';return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'.$drawing.'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';}
+    private function contentTypes(bool $hasLogo,int $count=1):string{
+        $sheets='';
+        for($i=1;$i<=$count;$i++)$sheets.='<Override PartName="/xl/worksheets/sheet'.$i.'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        $drawing=$hasLogo?'<Default Extension="png" ContentType="image/png"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>':'';return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'.$drawing.'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'.$sheets.'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';}
     private function packageRelationships():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>';}
-    private function workbook():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="Date Sheet" sheetId="1" r:id="rId1"/></sheets></workbook>';}
-    private function workbookRelationships():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';}
-    private function styles():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="7"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="16"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font><font><b/><sz val="14"/><name val="Arial"/></font><font><sz val="11"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF0ED"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FF4B5652"/></left><right style="thin"><color rgb="FF4B5652"/></right><top style="thin"><color rgb="FF4B5652"/></top><bottom style="thin"><color rgb="FF4B5652"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';}
+    private function workbook(array $names=['Date Sheet']):string
+    {
+        $sheets='';
+        foreach(array_values($names) as $i=>$name){
+            $id=$i+1;
+            $sheets.='<sheet name="'.$this->xml($name).'" sheetId="'.$id.'" r:id="rId'.$id.'"/>';
+        }
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>'.$sheets.'</sheets></workbook>';
+    }
+
+    private function workbookRelationships(int $count=1):string
+    {
+        $xml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        for($i=1;$i<=$count;$i++)$xml.='<Relationship Id="rId'.$i.'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'.$i.'.xml"/>';
+        return $xml.'<Relationship Id="rId'.($count+1).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+    }
+    private function styles():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy hh:mm:ss"/></numFmts><fonts count="7"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font><font><b/><sz val="16"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font><font><b/><sz val="14"/><name val="Arial"/></font><font><sz val="11"/><name val="Arial"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF0ED"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF93C47D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFF9900"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border/><border><left style="thin"><color rgb="FF4B5652"/></left><right style="thin"><color rgb="FF4B5652"/></right><top style="thin"><color rgb="FF4B5652"/></top><bottom style="thin"><color rgb="FF4B5652"/></bottom></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="13"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="4" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="2" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';}
 
     private function worksheetRelationships():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>';}
     private function drawingRelationships():string{return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/gbu-emblem.png"/></Relationships>';}

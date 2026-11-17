@@ -38,5 +38,28 @@ try{
     $wrongSchool=$scope;$wrongSchool['school_id']=2;$bad=$validator->validate($wrongSchool,1,false);sessionCheck($bad['blocked']>0,'Wrong-school validation was weakened');
     $pdo->exec('UPDATE batches SET start_year=2010,end_year=2014 WHERE id=1');$bad=$validator->validate($scope,1,false);$badChecks=array_column($bad['checks'],null,'code');sessionCheck(($badChecks['scope.completed_batches']['state']??'')==='blocked','Completed-batch validation was weakened');
     sessionCheck($badChecks['scope.completed_batches']['details']['batch_ids']===[1],'Completed-batch error did not identify its selection');
+
+    $_SERVER['REQUEST_METHOD'] = 'POST';
+    $_SERVER['REQUEST_URI'] = '/exam-cycles';
+    $_SERVER['SCRIPT_NAME'] = '/index.php';
+    $_POST = [
+        '_token' => $app->session()->csrfToken(), 'name' => 'Hosted calendar', 'academic_year' => '2026-2027',
+        'exam_type' => 'end_sem', 'start_date' => '2026-11-16', 'end_date' => '2026-11-17', 'batch_ids' => [1],
+        'shift1_start' => '09:00', 'shift1_end' => '12:00', 'shift2_start' => '13:00', 'shift2_end' => '16:00',
+    ];
+    $app->session()->put('user', ['id' => 999, 'username' => 'test', 'role_code' => 'admin']);
+    $response = $app->handle(App\Http\Request::capture());
+    $headers = new ReflectionProperty($response, 'headers');
+    sessionCheck($headers->getValue($response)['Location'] === url('login'), 'Missing creator did not redirect to sign-in');
+    sessionCheck($app->auth()->user() === null && !$app->session()->validCsrf($_POST['_token']), 'Stale session or its CSRF token survived');
+    sessionCheck((int)$pdo->query('SELECT COUNT(*) FROM exam_cycles')->fetchColumn() === 1, 'Stale session created a cycle');
+
+    $app->session()->put('user', ['id' => 1, 'username' => 'test', 'role_code' => 'admin']);
+    $_POST['_token'] = $app->session()->csrfToken();
+    $response = $app->handle(App\Http\Request::capture());
+    $created = $pdo->query("SELECT id, created_by FROM exam_cycles WHERE name='Hosted calendar'")->fetch();
+    sessionCheck($created && (int)$created['created_by'] === 1, 'Current administrator could not create a cycle');
+    sessionCheck($headers->getValue($response)['Location'] === url('date-sheets/'.$created['id']), 'Cycle creation did not redirect to its date sheet');
+    sessionCheck((int)$pdo->query('SELECT COUNT(*) FROM exam_calendar_dates WHERE cycle_id='.(int)$created['id'])->fetchColumn() === 2, 'Current administrator could not generate calendar dates');
     echo "Scheduling academic session: PASS (non-blocking date mismatch, persisted ready state, generation, cycle-year semester retained, school and completed-batch guards)\n";
 }finally{if(isset($pdo)&&$pdo->inTransaction())$pdo->rollBack();$server->exec("DROP DATABASE IF EXISTS `$db`");}

@@ -3,6 +3,8 @@ DirectoryIndex public/index.php
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    RewriteRule ^(?:app|bootstrap|config|database|resources|storage)(?:/|$) - [F,L,NC]
+    RewriteRule ^$ public/index.php [L]
     RewriteRule ^public(?:/|$) - [L]
     RewriteRule ^(.*)$ public/$1 [L,QSA]
 </IfModule>

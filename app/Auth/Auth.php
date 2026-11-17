@@ -27,6 +27,31 @@ final class Auth
         return true;
     }
 
+    public function refresh(): void
+    {
+        $sessionUser = $this->user();
+        if ($sessionUser === null) {
+            return;
+        }
+
+        $statement = $this->database->connection()->prepare(
+            "SELECT u.id, u.username, u.name, r.code AS role_code, r.name AS role_name
+             FROM users u JOIN roles r ON r.id = u.role_id
+             WHERE u.id = :id AND u.status = 'active'"
+        );
+        $statement->execute(['id' => $sessionUser['id'] ?? null]);
+        $user = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($user && $user['username'] === ($sessionUser['username'] ?? null)) {
+            $this->session->put('user', $user);
+            return;
+        }
+
+        $this->logout();
+        $this->session->start();
+        $this->session->regenerate();
+        $this->session->flash('error', 'Your session is no longer valid. Please sign in again.');
+    }
+
     public function check(): bool { return is_array($this->session->get('user')); }
     public function user(): ?array { $user = $this->session->get('user'); return is_array($user) ? $user : null; }
     public function can(string $permission):bool {return $this->check()&&RolePolicy::allows((string)($this->user()['role_code']??''),$permission);}

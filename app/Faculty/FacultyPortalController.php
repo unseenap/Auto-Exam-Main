@@ -22,7 +22,7 @@ final class FacultyPortalController
                 if($method==='POST'){
                     $revision=(int)$request->input('revision',-1);
                     switch($action){
-                        case 'mark':return Response::json(['ok'=>true]+$service->mark($user,$id,(int)$request->input('record_id'),(string)$request->input('status'),(string)$request->input('remarks'),$revision));
+                        case 'mark':return Response::json(['ok'=>true]+$service->mark($user,$id,(int)$request->input('record_id'),(string)$request->input('status'),(string)$request->input('remarks'),$revision,(array)$request->input('ufm',[])));
                         case 'submit':$service->submit($user,$id,$revision);$message='Room attendance submitted and locked.';break;
                         case 'acknowledge':$service->acknowledge($user,$id);$message='Duty acknowledged. Student attendance is unchanged.';break;
                         case 'replacement':$service->replacement($user,$id,(string)$request->input('reason'));$message='Replacement requested. Your duty remains assigned until the coordinator approves a replacement.';break;

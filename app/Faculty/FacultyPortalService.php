@@ -72,7 +72,7 @@ final class FacultyPortalService
     public function records(int $allocation,int $room):array
     {
         $period=(new \App\Seating\SeatingRoster($this->pdo))->period((int)$this->row('SELECT cycle_id FROM seating_allocations WHERE id=?',[$allocation])['cycle_id']);
-        return $this->rows('SELECT a.*,rs.seat_label,rs.row_no,rs.column_no,s.roll_no_original,s.enrollment_number,s.name,p.code AS programme_code,b.label AS batch_label,COALESCE(t.semester,s.semester) AS semester,c.code AS course_code,c.name AS course_name,u.name AS marked_name FROM attendance a JOIN seating_assignments x ON x.allocation_id=a.allocation_id AND x.student_id=a.student_id AND x.examination_id=a.examination_id AND x.room_id=a.room_id JOIN room_seats rs ON rs.id=x.seat_id JOIN students s ON s.id=a.student_id LEFT JOIN student_term_enrollments t ON t.student_id=s.id AND t.academic_session=? AND t.term=? JOIN programmes p ON p.id=COALESCE(t.programme_id,s.programme_id) LEFT JOIN batches b ON b.id=COALESCE(t.batch_id,s.batch_id) JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id LEFT JOIN users u ON u.id=a.marked_by WHERE a.allocation_id=? AND a.room_id=? ORDER BY rs.sequence_no',[$period['session'],$period['term'],$allocation,$room]);
+        return $this->rows('SELECT a.*,ufm.first_copy_serial,ufm.second_copy_serial,rs.seat_label,rs.row_no,rs.column_no,s.roll_no_original,s.enrollment_number,s.name,p.code AS programme_code,b.label AS batch_label,COALESCE(t.semester,s.semester) AS semester,c.code AS course_code,c.name AS course_name,u.name AS marked_name FROM attendance a LEFT JOIN attendance_ufm ufm ON ufm.attendance_id=a.id JOIN seating_assignments x ON x.allocation_id=a.allocation_id AND x.student_id=a.student_id AND x.examination_id=a.examination_id AND x.room_id=a.room_id JOIN room_seats rs ON rs.id=x.seat_id JOIN students s ON s.id=a.student_id LEFT JOIN student_term_enrollments t ON t.student_id=s.id AND t.academic_session=? AND t.term=? JOIN programmes p ON p.id=COALESCE(t.programme_id,s.programme_id) LEFT JOIN batches b ON b.id=COALESCE(t.batch_id,s.batch_id) JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id LEFT JOIN users u ON u.id=a.marked_by WHERE a.allocation_id=? AND a.room_id=? ORDER BY rs.sequence_no',[$period['session'],$period['term'],$allocation,$room]);
     }
     public function window(array $d):array
     {
@@ -99,19 +99,40 @@ final class FacultyPortalService
         $window=$this->window($d);if(!$window['allowed']&&(!$s['reopened_until']||$s['reopened_until']<$this->stamp()))throw new PortalException('Attendance for room '.$d['room_code'].' is editable from '.$window['open'].' to '.$window['close'].' (Asia/Kolkata).',403);
         return [$d,$a,$s];
     }
-    public function mark(int $user,int $duty,int $record,string $status,string $remarks,int $revision):array
+    public function mark(int $user,int $duty,int $record,string $status,string $remarks,int $revision,array $serials=[]):array
     {
-        return $this->transaction(function()use($user,$duty,$record,$status,$remarks,$revision){
+        return $this->transaction(function()use($user,$duty,$record,$status,$remarks,$revision,$serials){
             [$d,$a,$s]=$this->editContext($user,$duty,$revision);
             if(!in_array($status,['unmarked','present','absent','unfair_means','withheld','other'],true))throw new PortalException('Choose a valid attendance status.');
             if(strlen($remarks)>255)throw new PortalException('Attendance remarks must be at most 255 characters.');
             if(in_array($status,['unfair_means','withheld','other'],true)&&trim($remarks)==='')throw new PortalException('Explain the exceptional attendance status in Remarks.');
-            $old=$this->row('SELECT * FROM attendance WHERE id=? AND allocation_id=? AND room_id=?',[$record,$a['id'],$d['room_id']]);if(!$old)throw new PortalException('This student attendance record is outside your assigned room.',403);
+            $old=$this->row('SELECT a.*,ufm.first_copy_serial,ufm.second_copy_serial FROM attendance a LEFT JOIN attendance_ufm ufm ON ufm.attendance_id=a.id WHERE a.id=? AND a.allocation_id=? AND a.room_id=?',[$record,$a['id'],$d['room_id']]);if(!$old)throw new PortalException('This student attendance record is outside your assigned room.',403);
+            $books=$this->ufmSerials($status,$serials,$old);
             $this->exec('UPDATE attendance SET status=?,remarks=?,marked_by=?,marked_at=? WHERE id=?',[$status,trim($remarks)?:null,$user,$this->stamp(),$record]);
+            $this->saveUfm($record,$books);
             $this->exec('UPDATE faculty_room_sessions SET revision=revision+1,edited_by=?,edited_at=? WHERE id=?',[$user,$this->stamp(),$s['id']]);
-            $this->audit($user,'faculty.attendance_saved','attendance',$record,['before'=>$old['status'],'after'=>$status,'remarks'=>$remarks,'duty_id'=>$duty]);
+            $this->audit($user,'faculty.attendance_saved','attendance',$record,['before'=>$old['status'],'after'=>$status,'remarks'=>$remarks,'duty_id'=>$duty]+$books);
             return ['revision'=>$revision+1,'saved_at'=>$this->stamp()];
         });
+    }
+    private function ufmSerials(string $status,array $input,array $previous):array
+    {
+        if($status!=='unfair_means')return [];
+        $serials=[];
+        foreach(['first_copy_serial','second_copy_serial'] as $key){
+            $value=$input[$key]??$previous[$key]??'';
+            if(!is_string($value)||mb_strlen(trim($value))>64)throw new PortalException('Answer-book serial numbers must be at most 64 characters.');
+            $serials[$key]=trim($value);
+        }
+        return $serials;
+    }
+    private function saveUfm(int $record,array $serials):void
+    {
+        if(!$serials){
+            $this->exec('DELETE FROM attendance_ufm WHERE attendance_id=?',[$record]);
+            return;
+        }
+        $this->exec('INSERT INTO attendance_ufm(attendance_id,first_copy_serial,second_copy_serial) VALUES(?,?,?) ON DUPLICATE KEY UPDATE first_copy_serial=VALUES(first_copy_serial),second_copy_serial=VALUES(second_copy_serial)',[$record,$serials['first_copy_serial'],$serials['second_copy_serial']]);
     }
     public function submit(int $user,int $duty,int $revision):void
     {
@@ -202,19 +223,23 @@ final class FacultyPortalService
     }
 
     /** Keeps the existing coordinator sheet subject to shared revision and final locks. */
-    public function coordinatorAttendance(int $user,int $allocation,array $statuses,array $revisions,array $remarks=[]):void
+    public function coordinatorAttendance(int $user,int $allocation,array $statuses,array $revisions,array $remarks=[],array $serials=[]):void
     {
         $this->requireCoordinator($user);
-        $this->transaction(function()use($user,$allocation,$statuses,$revisions,$remarks){
+        $this->transaction(function()use($user,$allocation,$statuses,$revisions,$remarks,$serials){
             if(!$this->row("SELECT id FROM seating_allocations WHERE id=? AND status='published' FOR UPDATE",[$allocation]))throw new PortalException('Only published attendance sheets can be edited.');
             $changed=[];
             foreach($statuses as $id=>$status){
-                $r=$this->row('SELECT * FROM attendance WHERE id=? AND allocation_id=? FOR UPDATE',[(int)$id,$allocation]);if(!$r)throw new PortalException('Attendance entry #'.(int)$id.' does not belong to this allocation.');
-                $note=trim((string)($remarks[$id]??$r['remarks']??''));if($status===$r['status']&&$note===trim((string)$r['remarks']))continue;
+                $r=$this->row('SELECT a.*,ufm.first_copy_serial,ufm.second_copy_serial FROM attendance a LEFT JOIN attendance_ufm ufm ON ufm.attendance_id=a.id WHERE a.id=? AND a.allocation_id=?',[(int)$id,$allocation]);if(!$r)throw new PortalException('Attendance entry #'.(int)$id.' does not belong to this allocation.');
+                $note=trim((string)($remarks[$id]??$r['remarks']??''));
                 if(!in_array($status,['unmarked','present','absent','unfair_means','withheld','other'],true)||strlen($note)>255)throw new PortalException('Invalid attendance status or remarks for entry #'.(int)$id.'.');
+                $books=$this->ufmSerials($status,(array)($serials[$id]??[]),$r);
+                if($status===$r['status']&&$note===trim((string)$r['remarks'])&&(!$books||$books===['first_copy_serial'=>$r['first_copy_serial']??'','second_copy_serial'=>$r['second_copy_serial']??'']))continue;
                 if(in_array($status,['unfair_means','withheld','other'],true)&&$note==='')throw new PortalException('Remarks are required for exceptional attendance entry #'.(int)$id.'.');
                 $room=(int)$r['room_id'];if(!isset($changed[$room])){$s=$this->session($allocation,$room,true);if($s['status']==='submitted')throw new PortalException('Room #'.$room.' attendance is submitted. Approve a correction request in Faculty requests before editing.',409);if((int)$s['revision']!==(int)($revisions[$room]??-1))throw new PortalException('Room #'.$room.' changed after this sheet was opened. Reload before saving.',409);$changed[$room]=$s['id'];}
-                $this->exec('UPDATE attendance SET status=?,remarks=?,marked_by=?,marked_at=? WHERE id=?',[$status,$note?:null,$user,$this->stamp(),$id]);$this->audit($user,'attendance.coordinator_saved','attendance',(int)$id,['before'=>$r['status'],'after'=>$status,'remarks'=>$note]);
+                $this->exec('UPDATE attendance SET status=?,remarks=?,marked_by=?,marked_at=? WHERE id=?',[$status,$note?:null,$user,$this->stamp(),$id]);
+                $this->saveUfm((int)$id,$books);
+                $this->audit($user,'attendance.coordinator_saved','attendance',(int)$id,['before'=>$r['status'],'after'=>$status,'remarks'=>$note]+$books);
             }
             foreach($changed as $session)$this->exec('UPDATE faculty_room_sessions SET revision=revision+1,edited_by=?,edited_at=? WHERE id=?',[$user,$this->stamp(),$session]);
         });

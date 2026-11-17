@@ -57,6 +57,10 @@
     checks.forEach((article,index)=>{
       const state=article.classList.contains('blocked')?'blocked':article.classList.contains('warning')?'warning':null;if(!state)return;
       let details={};try{details=JSON.parse(article.dataset.validationDetails||'{}');}catch{}
+      if(article.dataset.validationCode.startsWith('calendar.')&&article.dataset.validationCode.includes('duration')){
+        const calendar=document.getElementById('scheduler-calendar-link');
+        if(calendar){const link=document.createElement('a');link.className='scheduler-show-selection';link.href=calendar.href;link.textContent='Edit exam shifts →';article.querySelector('div')?.append(link);}
+      }
       const nodes=targets({code:article.dataset.validationCode,details});if(!nodes.length)return;
       const message=article.querySelector('p');if(!message)return;message.id=container.id+'-selection-message-'+index;
       nodes.forEach(node=>mark(node,state,message.id));

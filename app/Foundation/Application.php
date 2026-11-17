@@ -88,6 +88,7 @@ final class Application
             return Response::json(['status' => 'ok', 'application' => $this->config('app.name'), 'php' => PHP_VERSION,
                 'database' => $this->database->available() ? 'connected' : 'unavailable', 'time' => date(DATE_ATOM)]);
         }
+        $this->auth->refresh();
         if ($path === '/login' && $method === 'GET') {
             return $this->auth->check() ? Response::redirect(url('dashboard')) : Response::html(View::render('auth/login'));
         }
@@ -110,7 +111,7 @@ final class Application
         }
         if ($path === '/') return Response::redirect($this->auth->check() ? url('dashboard') : url('login'));
         if (!$this->auth->check()) {
-            $this->session->flash('error', 'Please sign in to continue.');
+            $this->session->flash('error', $this->session->pullFlash('error', 'Please sign in to continue.'));
             return Response::redirect(url('login'));
         }
         $required=$this->requiredPermission($path);
@@ -203,6 +204,8 @@ final class Application
         if(preg_match('#^/seating/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('seating/preview',$this->seatingPreviewData((int)$matches[1])));
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('attendance/sheet',$this->attendanceSheetData((int)$matches[1])));
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->saveAttendance($request,(int)$matches[1]);
+        if(preg_match('#^/attendance/(\d+)/export\.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->attendanceXlsx((int)$matches[1],false);
+        if(preg_match('#^/attendance/cycles/(\d+)/export\.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->attendanceXlsx((int)$matches[1],true);
         if(preg_match('#^/invigilation/allocate/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->allocateInvigilators($request,(int)$matches[1]);
         if($path==='/replacements'&&$method==='POST')return $this->requestReplacement($request);
         if(preg_match('#^/replacements/(\d+)/(approve|reject)$#',$path,$matches)===1&&$method==='POST')return $this->reviewReplacement($request,(int)$matches[1],$matches[2]);
@@ -1077,27 +1080,47 @@ final class Application
 
     private function attendanceData(): array
     {
-        return ['allocations'=>$this->database->connection()->query("SELECT sa.id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,
-            COUNT(a.id) AS student_count,SUM(a.status='present') AS present_count,SUM(a.status='absent') AS absent_count,
+        return ['allocations'=>$this->database->connection()->query("SELECT sa.id,sa.cycle_id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,
+            COUNT(a.id) AS student_count,SUM(a.status NOT IN ('absent','unmarked')) AS present_count,SUM(a.status='absent') AS absent_count,
             SUM(a.status='unmarked') AS unmarked_count,COUNT(DISTINCT a.room_id) AS room_count
             FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id LEFT JOIN attendance a ON a.allocation_id=sa.id
             WHERE sa.status='published' GROUP BY sa.id ORDER BY sa.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success')];
     }
 
+    private function attendanceXlsx(int $id,bool $wholeCycle): Response
+    {
+        $pdo=$this->database->connection();
+        $scope=$wholeCycle?'cycle_id':'id';
+        $query=$pdo->prepare("SELECT cycle_id FROM seating_allocations WHERE {$scope}=? AND status='published' LIMIT 1");
+        $query->execute([$id]);
+        $cycleId=$query->fetchColumn();
+        if(!$cycleId)return Response::html(View::render('errors/404'),404);
+        \App\Faculty\FacultyPortalMigration::apply($pdo);
+        $bytes=(new \App\Export\AttendanceWorkbook($pdo))->build((int)$cycleId,$wholeCycle?null:$id);
+        return Response::xlsx($bytes,'gbu-attendance-'.($wholeCycle?'cycle':'session').'-'.$id.'.xlsx');
+    }
+
     private function attendanceSheetData(int $allocationId): array
     {
         $pdo=$this->database->connection();$q=$pdo->prepare("SELECT sa.*,ec.name AS cycle_name,es.name AS shift_name,es.start_time,es.end_time FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id WHERE sa.id=:id AND sa.status='published'");$q->execute(['id'=>$allocationId]);$allocation=$q->fetch(PDO::FETCH_ASSOC);if(!$allocation)throw new \RuntimeException('Published allocation not found.');
-        $q=$pdo->prepare("SELECT a.*,r.code AS room_code,s.roll_no_original,s.name,p.code AS programme_code,rs.seat_label,c.code AS course_code
-            FROM attendance a JOIN rooms r ON r.id=a.room_id JOIN students s ON s.id=a.student_id JOIN programmes p ON p.id=s.programme_id
-            JOIN seating_assignments sa ON sa.allocation_id=a.allocation_id AND sa.student_id=a.student_id JOIN room_seats rs ON rs.id=sa.seat_id JOIN examinations e ON e.id=a.examination_id JOIN courses c ON c.id=e.course_id
-            WHERE a.allocation_id=:id ORDER BY r.code,rs.sequence_no");$q->execute(['id'=>$allocationId]);$records=$q->fetchAll(PDO::FETCH_ASSOC);$byRoom=[];foreach($records as $record)$byRoom[$record['room_code']][]=$record;\App\Faculty\FacultyPortalMigration::apply($pdo);$roomStates=[];$portal=new \App\Faculty\FacultyPortalService($pdo);foreach($records as $record)$roomStates[(int)$record['room_id']]=$portal->session($allocationId,(int)$record['room_id']);return compact('allocation','records','byRoom','roomStates')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        \App\Faculty\FacultyPortalMigration::apply($pdo);
+        $portal=new \App\Faculty\FacultyPortalService($pdo);
+        $byRoom=[];
+        $roomStates=[];
+        foreach($portal->rows('SELECT DISTINCT r.id,r.code FROM attendance a JOIN rooms r ON r.id=a.room_id WHERE a.allocation_id=? ORDER BY r.code',[$allocationId]) as $room){
+            $roomId=(int)$room['id'];
+            $roomStates[$roomId]=$portal->session($allocationId,$roomId);
+            $records=$portal->records($allocationId,$roomId);
+            if($records)$byRoom[$room['code']]=$records;
+        }
+        return compact('allocation','byRoom','roomStates')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveAttendance(Request $request,int $allocationId): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('attendance/'.$allocationId));
         $pdo=$this->database->connection();\App\Faculty\FacultyPortalMigration::apply($pdo);
-        try{(new \App\Faculty\FacultyPortalService($pdo))->coordinatorAttendance((int)$this->auth->user()['id'],$allocationId,(array)$request->input('status',[]),(array)$request->input('revisions',[]),(array)$request->input('remarks',[]));$this->session->flash('success','Attendance saved.');}
+        try{(new \App\Faculty\FacultyPortalService($pdo))->coordinatorAttendance((int)$this->auth->user()['id'],$allocationId,(array)$request->input('status',[]),(array)$request->input('revisions',[]),(array)$request->input('remarks',[]),(array)$request->input('ufm',[]));$this->session->flash('success','Attendance saved.');}
         catch(\App\Faculty\PortalException $e){$this->session->flash('error',$e->getMessage());}
         return Response::redirect(url('attendance/'.$allocationId));
     }

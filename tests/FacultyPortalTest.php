@@ -31,7 +31,7 @@ try{
     $data=$service->room(2,1);fpCheck(count($data['records'])===3&&count($data['seats'])===6,'Room geometry or student scope incorrect');fpCheck($data['window']['reporting']==='09:00','Reporting interval wrong');
     // Render real pages for browser verification, using only synthetic records.
     $app=new App\Foundation\Application(BASE_PATH);$app->boot();$database=new App\Foundation\Database(array_merge($c,['database'=>$db]));(new ReflectionProperty($database,'connection'))->setValue($database,$pdo);(new ReflectionProperty($app,'database'))->setValue($app,$database);(new ReflectionProperty($app,'auth'))->setValue($app,new App\Auth\Auth($database,$app->session()));
-    $login=function(int $id,string $role='faculty')use($app){$app->session()->put('user',['id'=>$id,'username'=>'synthetic','name'=>$id===2?'Dr Aditi Sharma':'Synthetic user','role_code'=>$role,'role_name'=>ucfirst($role)]);};$login(2);
+    $login=function(int $id,string $role='faculty')use($app,$pdo){$query=$pdo->prepare('SELECT username FROM users WHERE id=?');$query->execute([$id]);$app->session()->put('user',['id'=>$id,'username'=>$query->fetchColumn(),'name'=>$id===2?'Dr Aditi Sharma':'Synthetic user','role_code'=>$role,'role_name'=>ucfirst($role)]);};$login(2);
     $out=BASE_PATH.'/outputs/faculty-panel';if(!is_dir($out))mkdir($out,0770,true);$_SERVER['REQUEST_URI']='/faculty-panel/duties/1';
     file_put_contents($out.'/room.html',App\View\View::render('faculty-panel/room',$data+['faculty'=>$service->faculty(2),'success'=>null,'error'=>null]));
     file_put_contents($out.'/snapshot.json',json_encode(['revision'=>0,'state'=>$data['state'],'records'=>$data['records'],'window'=>$data['window']],JSON_THROW_ON_ERROR));
@@ -41,7 +41,10 @@ try{
     $service->mark(2,1,1,'present','',0);fpReject(fn()=>$service->mark(3,2,2,'absent','',0),'Another invigilator',409);
     fpReject(fn()=>$service->mark(2,1,3,'unfair_means','',1),'Remarks');
     fpReject(fn()=>$service->submit(2,1,1),'245LCS001');
-    $service->mark(3,2,2,'absent','',1);$service->mark(2,1,3,'withheld','Answer book held for review',2);$service->submit(2,1,3);
+    $service->mark(3,2,2,'absent','',1);
+    fpReject(fn()=>$service->mark(2,1,3,'unfair_means','Incident recorded',2,['first_copy_serial'=>str_repeat('1',65)]),'64 characters');
+    $service->mark(2,1,3,'unfair_means','Unauthorized notes found',2,['first_copy_serial'=>'00123','second_copy_serial'=>'00456']);
+    $service->submit(2,1,3);
     fpReject(fn()=>$service->mark(2,1,1,'absent','',4),'locked',409);
     fpReject(fn()=>$service->coordinatorAttendance(6,1,[1=>'absent'],[1=>4]),'submitted',409);
     fpReject(fn()=>$service->closeReport(2,1,4,[1=>'1',2=>'1'],false,'',''),'handed over');
@@ -61,7 +64,7 @@ try{
     $service->changePassword(8,'SyntheticPassword12!','NewSyntheticPassword12!','NewSyntheticPassword12!');fpCheck(password_verify('NewSyntheticPassword12!',$pdo->query('SELECT password_hash FROM users WHERE id=8')->fetchColumn()),'Password change failed');
     // Exercise real route permission checks, CSRF and object ownership.
     $call=function(string $path,array $post=[])use($app){$_POST=$post;$_GET=[];$_SERVER['REQUEST_METHOD']=$post?'POST':'GET';$_SERVER['REQUEST_URI']=$path;$_SERVER['SCRIPT_NAME']='/index.php';return $app->handle(App\Http\Request::capture());};
-    $login(2);foreach(['/seating','/attendance/1','/users','/faculty-operations','/faculty-panel/duties/3/snapshot'] as $path){$response=$call($path);fpCheck((new ReflectionProperty($response,'status'))->getValue($response)===403,'Unauthorized route exposed: '.$path);}
+    $login(2);foreach(['/seating','/attendance/1','/attendance/1/export.xlsx','/attendance/cycles/'.$cycle.'/export.xlsx','/users','/faculty-operations','/faculty-panel/duties/3/snapshot'] as $path){$response=$call($path);fpCheck((new ReflectionProperty($response,'status'))->getValue($response)===403,'Unauthorized route exposed: '.$path);}
     $login(3);$response=$call('/faculty-panel/duties/2/mark',['_token'=>'bad','record_id'=>1,'status'=>'present','revision'=>7]);fpCheck((new ReflectionProperty($response,'status'))->getValue($response)===403,'CSRF bypass');
     $login(5);$response=$call('/faculty-panel');fpCheck((new ReflectionProperty($response,'status'))->getValue($response)===403,'Unlinked account admitted');
     $login(8);$pdo->exec("UPDATE users SET status='locked' WHERE id=8");fpReject(fn()=>$service->room(8,4),'not linked',403);
@@ -75,6 +78,30 @@ try{
     $login(6,'invigilation_coordinator');$_SERVER['REQUEST_URI']='/faculty-operations';$operations=$controller->handle(App\Http\Request::capture(),'/faculty-operations');file_put_contents($out.'/operations.html',(new ReflectionProperty($operations,'content'))->getValue($operations));
     // Coordinator saves must still work on another editable room and reject stale forms.
     $service->session(1,2);$service->coordinatorAttendance(6,1,[4=>'present'],[2=>0]);fpReject(fn()=>$service->coordinatorAttendance(6,1,[4=>'absent'],[2=>0]),'changed',409);
+    $service->coordinatorAttendance(6,1,[4=>'unfair_means'],[2=>1],[4=>'Reported incident'],[4=>['first_copy_serial'=>'00077']]);
+    $service->coordinatorAttendance(6,1,[4=>'absent'],[2=>2],[4=>'']);
+    fpCheck(!(bool)$pdo->query('SELECT attendance_id FROM attendance_ufm WHERE attendance_id=4')->fetchColumn(),'Cleared UFM serials remained in storage');
+    $pdo->exec("INSERT INTO examinations(cycle_id,shift_id,course_id,exam_date,status) VALUES($cycle,$shift,1,'2026-11-04','published');
+        INSERT INTO seating_allocations(cycle_id,exam_date,shift_id,version_no,seed_value,rule_profile,status,generated_by,generated_at)
+        VALUES($cycle,'2026-11-04',$shift,1,'test','{}','published',1,'2026-11-04 08:00:00');
+        INSERT INTO seating_assignments(allocation_id,examination_id,student_id,room_id,seat_id) VALUES(2,3,4,2,$otherSeat)");
+    foreach(['/attendance/1/export.xlsx'=>'shift','/attendance/cycles/'.$cycle.'/export.xlsx'=>'cycle'] as $path=>$scope){
+        $response=$call($path);
+        fpCheck((new ReflectionProperty($response,'status'))->getValue($response)===200,'Attendance export failed');
+        $path=$out.'/attendance-'.$scope.'.xlsx';
+        file_put_contents($path,(new ReflectionProperty($response,'content'))->getValue($response));
+        $zip=new ZipArchive();
+        fpCheck($zip->open($path)===true,'Attendance export is not a valid workbook package');
+        $workbook=$zip->getFromName('xl/workbook.xml');
+        fpCheck(str_contains($workbook,'name="UFMData"')&&str_contains($workbook,'name="Summary_03M"'),'Missing UFM or shift summary');
+        fpCheck(str_contains($workbook,'name="Summary_04M"')===($scope==='cycle'),'Export scope mismatch');
+        $ufm=$zip->getFromName('xl/worksheets/sheet1.xml');
+        fpCheck(str_contains($ufm,'00123')&&str_contains($ufm,'00456')&&str_contains($ufm,'235UAI001')&&!str_contains($ufm,'00077'),'UFM workbook details incorrect');
+        $summary=$zip->getFromName('xl/worksheets/sheet'.($scope==='cycle'?5:3).'.xml');
+        fpCheck(str_contains($summary,'235UCS004')&&str_contains($summary,'235UAI001'),'Summary lost absentee or UFM roll numbers');
+        if($scope==='cycle')fpCheck(str_contains($zip->getFromName('xl/worksheets/sheet2.xml'),'Incomplete'),'Missing attendance was not shown as incomplete');
+        $zip->close();
+    }
     fpCheck((int)$pdo->query("SELECT COUNT(*) FROM audit_logs WHERE action='faculty.attendance_submitted'")->fetchColumn()===1,'Submission audit missing');
     echo "Faculty portal: PASS (migration, account links, room ownership, CSRF/routes, attendance/revision conflicts, final locks, report counts, corrections, replacements, availability conflicts, password and audit)\n";
 }finally{if(isset($pdo)&&$pdo->inTransaction())$pdo->rollBack();$server->exec("DROP DATABASE IF EXISTS `$db`");}

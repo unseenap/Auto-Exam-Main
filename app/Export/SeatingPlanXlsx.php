@@ -50,6 +50,24 @@ final class SeatingPlanXlsx
     {$r=$this->col($col).$row;return is_int($value)?'<c r="'.$r.'" s="'.$style.'"><v>'.$value.'</v></c>':'<c r="'.$r.'" s="'.$style.'" t="inlineStr"><is><t xml:space="preserve">'.$this->x($value).'</t></is></c>';}
     private function row(int $row,array $cells,float $height=19.5):string{return '<row r="'.$row.'" ht="'.$height.'" customHeight="1">'.implode('',$cells).'</row>';}
 
+    /** Explicit wrapping is predictable in Excel, which cannot autofit merged cells. */
+    private function wrappedLines(string $text,float $width,int $fontSize=12): array
+    {
+        // Conservative allowance for the template's bold font, cell padding and borders.
+        $limit=max(1,(int)floor(($width*7-10)/($fontSize*0.72)));
+        $lines=[];
+        foreach(explode("\n",str_replace(["\r\n","\r"],"\n",$text)) as $paragraph){
+            $line='';
+            foreach(preg_split('/\s+/u',trim($paragraph),-1,PREG_SPLIT_NO_EMPTY) as $word){
+                if($line!==''&&mb_strlen($line.' '.$word)>$limit){$lines[]=$line;$line='';}
+                while(mb_strlen($word)>$limit){$lines[]=mb_substr($word,0,$limit);$word=mb_substr($word,$limit);}
+                if($word!=='')$line.=($line===''?'':' ').$word;
+            }
+            $lines[]=$line;
+        }
+        return $lines;
+    }
+
     public function build(array $document): string
     {
         if(!class_exists(ZipArchive::class))throw new RuntimeException('Excel export requires the PHP zip extension.');
@@ -152,14 +170,30 @@ final class SeatingPlanXlsx
     private function master(array $document): array
     {
         $a=$document['allocation'];$rows='';$merges=[];
+        $widths=[5.5703125,47.85546875,61.140625,15,11.5703125,41.5703125,12,14];
         foreach(['Gautam Buddha University',(['mid_sem'=>'Mid Semester','end_sem'=>'End Semester'][$a['exam_type']]??ucwords(str_replace('_',' ',$a['exam_type']))).' Examination ('.date('d-m-Y',strtotime($a['exam_date'])).')','Master Seating Plan for '.$a['session_label']] as $i=>$text){$r=$i+1;$rows.=$this->row($r,[$this->cell(1,$r,$text,$r===1?109:110)],$r===1?22.5:18.75);$merges[]='A'.$r.':H'.$r;}
         $headers=['S.No','Programme, Batch & Semester','Course Code & Course name','Building','Room','Roll No.','No. of Students','Total No. of Students'];$cells=[];foreach($headers as $i=>$text)$cells[]=$this->cell($i+1,4,$text,80);$rows.=$this->row(4,$cells,47.25);$r=4;$n=0;$total=0;
         $groups=[];foreach($document['rooms'] as $room)foreach($room['summary'] as $item){$key=json_encode([$item['programme_code'],$item['batch_label'],$item['semester'],$item['course_code'],$item['category']]);if(!isset($groups[$key]))$groups[$key]=['item'=>$item,'parts'=>[],'total'=>0];$groups[$key]['parts'][]=['building'=>$room['building'],'room'=>$room['code'],'rolls'=>$item['roll_detail'],'count'=>(int)$item['count']];$groups[$key]['total']+=(int)$item['count'];}
         foreach($groups as $group){$item=$group['item'];$start=$r+1;$n++;$total+=$group['total'];$sameBuilding=count(array_unique(array_column($group['parts'],'building')))===1;
-            foreach($group['parts'] as $index=>$part){$r++;$values=[$index===0?$n:'',$index===0?$item['programme_name'].' · '.($item['batch_label']?:'Batch not recorded').' · '.\App\Seating\SeatingPlanDocument::ordinal($item['semester']).' Semester':'',$index===0?$item['course_code'].' '.$item['course_name']:'',$index===0||!$sameBuilding?$part['building']:'',$part['room'],$part['rolls'],$part['count'],$index===0?$group['total']:''];$cells=[];foreach($values as $i=>$value)$cells[]=$this->cell($i+1,$r,$value,$i===0?106:($i===4?16:102));$rows.=$this->row($r,$cells,$index===0?37.5:19.5);}
+            foreach($group['parts'] as $index=>$part){
+                $partStart=$r+1;
+                // Stay below Excel's 409-point row-height limit even for sparse roll lists.
+                $chunks=array_chunk($this->wrappedLines($part['rolls'],$widths[5]),20);
+                foreach($chunks as $chunkIndex=>$lines){
+                    $r++;$first=$index===0&&$chunkIndex===0;
+                    $values=[$first?$n:'',$first?$item['programme_name'].' · '.($item['batch_label']?:'Batch not recorded').' · '.\App\Seating\SeatingPlanDocument::ordinal($item['semester']).' Semester':'',$first?$item['course_code'].' '.$item['course_name']:'',($first||!$sameBuilding)&&$chunkIndex===0?$part['building']:'',$chunkIndex===0?$part['room']:'',implode("\n",$lines),$chunkIndex===0?$part['count']:'',$first?$group['total']:''];
+                    $height=max($first?37.5:19.5,count($lines)*18+8);$cells=[];
+                    foreach($values as $i=>$value){
+                        if(is_string($value)&&$value!==''&&$i!==5){$wrapped=$this->wrappedLines($value,$widths[$i],$i===0?11:12);$value=implode("\n",$wrapped);$height=max($height,count($wrapped)*18+8);}
+                        $cells[]=$this->cell($i+1,$r,$value,$i===0?106:102);
+                    }
+                    $rows.=$this->row($r,$cells,min(409,$height));
+                }
+                if($r>$partStart)foreach($sameBuilding?[5,7]:[4,5,7] as $column)$merges[]=$this->col($column).$partStart.':'.$this->col($column).$r;
+            }
             if($r>$start)foreach($sameBuilding?[1,2,3,4,8]:[1,2,3,8] as $column)$merges[]=$this->col($column).$start.':'.$this->col($column).$r;
         }
-        $r++;$rows.=$this->row($r,[$this->cell(6,$r,'Total',42),$this->cell(7,$r,$total,47),$this->cell(8,$r,$total,47)]);$cols='';foreach([5.5703125,47.85546875,61.140625,15,11.5703125,41.5703125,12,14] as $i=>$width)$cols.='<col min="'.($i+1).'" max="'.($i+1).'" width="'.$width.'" customWidth="1"/>';
+        $r++;$rows.=$this->row($r,[$this->cell(6,$r,'Total',42),$this->cell(7,$r,$total,47),$this->cell(8,$r,$total,47)]);$cols='';foreach($widths as $i=>$width)$cols.='<col min="'.($i+1).'" max="'.($i+1).'" width="'.$width.'" customWidth="1"/>';
         return $this->sheet($rows,$cols,$merges,'$A$1:$H$'.$r,0);
     }
 }
