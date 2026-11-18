@@ -46,6 +46,7 @@ final class PairedCohortPlanner
     {
         if(($rules['mode']??'')!=='paired_cohorts')return true;
         $key=$rules['student_groups'][$studentId]??null;
+        if(isset($rules['seat_groups'][$seatId]))return $key!==null&&$key===$rules['seat_groups'][$seatId];
         if(($rules['allocation_mode']??'')==='automatic_pairs')return $key!==null&&$key===($rules['seat_groups'][$seatId]??null);
         foreach($rules['pairings']??[] as $pair)if(in_array($roomId,$pair['room_ids'],true))return $key!==null&&$key===($rules['room_columns'][$roomId][$column]??null);
         return false;
