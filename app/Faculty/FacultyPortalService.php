@@ -55,7 +55,7 @@ final class FacultyPortalService
         $f=$this->faculty($user);
         $d=$this->row('SELECT ia.*,ec.name AS cycle_name,es.name AS shift_name,es.start_time,es.end_time,r.code AS room_code,r.building,r.floor,r.rows_count,r.columns_count,r.notes FROM invigilation_allocations ia JOIN exam_cycles ec ON ec.id=ia.cycle_id JOIN exam_shifts es ON es.id=ia.shift_id JOIN rooms r ON r.id=ia.room_id WHERE ia.id=? AND ia.faculty_id=?'.($write?' FOR UPDATE':''),[$id,$f['id']]);
         if(!$d)throw new PortalException('This duty is not assigned to your faculty account.',403);
-        if($write&&in_array($d['duty_status'],['cancelled','completed'],true))throw new PortalException('Duty '.$id.' in room '.$d['room_code'].' is '.$d['duty_status'].'. Attendance changes are not allowed.',403);
+        if($write&&in_array($d['duty_status'],['cancelled','replaced','completed'],true))throw new PortalException('Duty '.$id.' in room '.$d['room_code'].' is '.$d['duty_status'].'. Attendance changes are not allowed.',403);
         return $d;
     }
     public function session(int $allocation,int $room,bool $lock=false):array
@@ -83,7 +83,7 @@ final class FacultyPortalService
     }
     public function room(int $user,int $duty):array
     {
-        $d=$this->duty($user,$duty);if($d['duty_status']==='cancelled')throw new PortalException('This duty was cancelled or reassigned. Access to its student records is no longer available.',403);
+        $d=$this->duty($user,$duty);if(in_array($d['duty_status'],['cancelled','replaced'],true))throw new PortalException('This duty was cancelled or reassigned. Access to its student records is no longer available.',403);
         $a=$this->allocation($d);$state=$this->session((int)$a['id'],(int)$d['room_id']);$records=$this->records((int)$a['id'],(int)$d['room_id']);
         $assigned=(int)$this->row('SELECT COUNT(*) AS n FROM seating_assignments WHERE allocation_id=? AND room_id=?',[$a['id'],$d['room_id']])['n'];
         if(count($records)!==$assigned)throw new PortalException('Room '.$d['room_code'].' has '.$assigned.' allocated students but '.count($records).' attendance entries. Ask the coordinator to repair the published attendance sheet.');
@@ -153,6 +153,19 @@ final class FacultyPortalService
     {
         $this->transaction(function()use($user,$duty,$reason){$d=$this->duty($user,$duty,true);$this->reason($reason);if($this->row("SELECT id FROM replacement_requests WHERE duty_id=? AND status='pending'",[$duty]))throw new PortalException('A replacement request is already pending for this duty.');$this->exec("INSERT INTO replacement_requests(duty_id,requested_by,reason,status) VALUES(?,?,?,'pending')",[$duty,$user,trim($reason)]);$this->audit($user,'faculty.replacement_requested','invigilation_allocation',$duty);});
     }
+    public function coordinatorReplacement(int $user,int $duty,string $reason,?int $suggested):void
+    {
+        $this->requireCoordinator($user);
+        $this->reason($reason);
+        $this->transaction(function()use($user,$duty,$reason,$suggested){
+            $record=$this->row("SELECT * FROM invigilation_allocations WHERE id=? AND duty_status IN ('assigned','confirmed') FOR UPDATE",[$duty]);
+            if(!$record)throw new PortalException('Choose an active duty for replacement.');
+            if($this->row("SELECT id FROM replacement_requests WHERE duty_id=? AND status='pending'",[$duty]))throw new PortalException('A replacement request is already pending for this duty.');
+            if($suggested&&($suggested===(int)$record['faculty_id']||!$this->row("SELECT id FROM faculty WHERE id=? AND status='active'",[$suggested])))throw new PortalException('Choose another active faculty member as the suggested replacement.');
+            $this->exec("INSERT INTO replacement_requests(duty_id,requested_by,reason,replacement_faculty_id,status) VALUES(?,?,?,?,'pending')",[$duty,$user,trim($reason),$suggested]);
+            $this->audit($user,'invigilation.replacement_requested','invigilation_allocation',$duty,['reason'=>trim($reason),'suggested_faculty_id'=>$suggested]);
+        });
+    }
     private function reason(string $reason):void{if(trim($reason)===''||strlen($reason)>1000)throw new PortalException('Enter a reason of 1–1000 characters.');}
     public function correction(int $user,int $duty,string $reason):void
     {
@@ -192,6 +205,8 @@ final class FacultyPortalService
     {
         $this->requireCoordinator($user);
         $this->transaction(function()use($user,$kind,$id,$approve,$replacement){
+            $invigilation=new InvigilationService($this->pdo);
+            if(in_array($kind,['availability','replacement'],true))$invigilation->lockFaculty();
             $table=match($kind){'correction'=>'faculty_correction_requests','availability'=>'faculty_availability_requests','replacement'=>'replacement_requests',default=>throw new PortalException('Unknown request type.')};
             $r=$this->row("SELECT * FROM {$table} WHERE id=? AND status='pending' FOR UPDATE",[$id]);if(!$r)throw new PortalException('This request has already been reviewed or no longer exists.',409);
             if($approve&&$kind==='correction'){
@@ -200,15 +215,16 @@ final class FacultyPortalService
                 $this->exec("UPDATE faculty_room_sessions SET status='draft',submitted_by=NULL,submitted_at=NULL,closing_report=NULL,report_by=NULL,report_at=NULL,reopened_until=?,revision=revision+1 WHERE id=?",[$this->now()->modify('+60 minutes')->format('Y-m-d H:i:s'),$s['id']]);
             }
             if($approve&&$kind==='availability'){
-                $conflict=$this->row("SELECT ia.id,rm.code FROM invigilation_allocations ia JOIN rooms rm ON rm.id=ia.room_id WHERE ia.faculty_id=? AND ia.exam_date=? AND ia.shift_id=? AND ia.duty_status<>'cancelled' FOR UPDATE",[$r['faculty_id'],$r['exam_date'],$r['shift_id']]);
-                if($r['availability']==='unavailable'&&$conflict)throw new PortalException('Duty #'.$conflict['id'].' in room '.$conflict['code'].' conflicts with this unavailability. Reassign the duty before approval.');
-                $this->exec('INSERT INTO faculty_availability(faculty_id,exam_date,shift_id,availability,reason) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE availability=VALUES(availability),reason=VALUES(reason)',[$r['faculty_id'],$r['exam_date'],$r['shift_id'],$r['availability'],$r['reason']]);
+                $session=$invigilation->session($r['exam_date'],(int)$r['shift_id']);
+                $conflict=$invigilation->dutyConflict((int)$r['faculty_id'],$session);
+                if($r['availability']==='unavailable'&&$conflict)throw new PortalException('Duty #'.$conflict['id'].' in room '.$conflict['room_code'].' conflicts with this unavailability. Reassign the duty before approval.');
+                // The complete explanation remains on the reviewed request.
+                $this->exec('INSERT INTO faculty_availability(faculty_id,exam_date,shift_id,availability,reason) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE availability=VALUES(availability),reason=VALUES(reason)',[$r['faculty_id'],$r['exam_date'],$r['shift_id'],$r['availability'],mb_substr($r['reason'],0,255)]);
             }
             if($approve&&$kind==='replacement'){
-                $d=$this->row("SELECT * FROM invigilation_allocations WHERE id=? AND duty_status NOT IN ('cancelled','completed') FOR UPDATE",[$r['duty_id']]);if(!$d)throw new PortalException('The original duty is no longer active. Reject this outdated request.');
+                $d=$this->row("SELECT * FROM invigilation_allocations WHERE id=? AND duty_status IN ('assigned','confirmed') FOR UPDATE",[$r['duty_id']]);if(!$d)throw new PortalException('The original duty is no longer active. Reject this outdated request.');
                 $f=$replacement?:((int)$r['replacement_faculty_id']);if(!$f||!$this->row("SELECT id FROM faculty WHERE id=? AND status='active' FOR UPDATE",[$f]))throw new PortalException('Choose an active replacement faculty member before approval.');
-                if($this->row('SELECT id FROM invigilation_allocations WHERE faculty_id=? AND exam_date=? AND shift_id=?',[$f,$d['exam_date'],$d['shift_id']]))throw new PortalException('The selected replacement already has a duty record in this examination session. Choose another faculty member.');
-                if($this->row("SELECT id FROM faculty_availability WHERE faculty_id=? AND exam_date=? AND shift_id=? AND availability='unavailable'",[$f,$d['exam_date'],$d['shift_id']]))throw new PortalException('The replacement is unavailable for this date and shift.');
+                $invigilation->assertAvailable($f,$invigilation->session($d['exam_date'],(int)$d['shift_id']));
                 $this->exec("UPDATE invigilation_allocations SET duty_status='cancelled' WHERE id=?",[$d['id']]);
                 $this->exec("INSERT INTO invigilation_allocations(cycle_id,exam_date,shift_id,room_id,faculty_id,duty_role,duty_status,assigned_by) VALUES(?,?,?,?,?,?,'assigned',?)",[$d['cycle_id'],$d['exam_date'],$d['shift_id'],$d['room_id'],$f,$d['duty_role'],$user]);
                 $this->exec('UPDATE faculty SET duty_count=duty_count+1 WHERE id=?',[$f]);$this->exec('UPDATE replacement_requests SET replacement_faculty_id=? WHERE id=?',[$f,$id]);

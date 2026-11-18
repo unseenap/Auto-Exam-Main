@@ -28,7 +28,12 @@ The system is designed for Gautam Buddha University and follows its school, prog
 ## Contents
 
 - [System capabilities](#system-capabilities)
+- [Academic progression](#academic-progression)
 - [Latest updates](#latest-updates)
+- [Faculty records and bulk import](#faculty-records-and-bulk-import)
+- [Invigilation and replacements](#invigilation-and-replacements)
+- [Faculty self-service portal](#faculty-self-service-portal)
+- [Rooms and seating plans](#rooms-and-seating-plans)
 - [Automatic date-sheet scheduling](#automatic-date-sheet-scheduling)
 - [Operational workflow](#operational-workflow)
 - [Data-flow diagrams](#data-flow-diagrams)
@@ -37,10 +42,12 @@ The system is designed for Gautam Buddha University and follows its school, prog
 - [Data conventions](#data-conventions)
 - [Database design](#database-design)
 - [Local installation](#local-installation)
+- [Upgrading an existing installation](#upgrading-an-existing-installation)
 - [InfinityFree deployment](#infinityfree-deployment)
 - [Demo data](#demo-data)
 - [Testing](#testing)
 - [Security](#security)
+- [Reporting and printing](#reporting-and-printing)
 
 ## System capabilities
 
@@ -49,15 +56,17 @@ The system is designed for Gautam Buddha University and follows its school, prog
 | Dashboard | Operational statistics, quick actions and role-aware navigation |
 | Academic masters | Schools, departments, programmes, duration in semesters, admission-session batches, programme codes and validated programme CSV/XLSX import |
 | Course structure | Batch-specific course name, code, credits, UG/PG level, academic year, semester, section, mid/end-semester duration, category, scheduling priority, active status and dependent programme/batch/semester filters |
-| Students | Individual records, large CSV/XLSX import, validation preview and programme detection |
-| Faculty | Faculty master, bulk import, school association and availability |
-| Rooms | Bulk room import, row/column geometry, visual layout, priority and disabled seats |
+| Students | Individual records, CSV/XLSX import, programme and lateral-entry detection, dependent directory filters and protected bulk deletion |
+| Academic progression | Calendar-driven session/year/semester reconciliation, term history, course registrations, holds, delays, withdrawal and verified completion |
+| Faculty | Required unique email, optional shared mobile number, generated internal IDs, school association, CSV/XLSX import preview and availability |
+| Faculty portal | Linked personal accounts, duties, acknowledgments, room attendance, submission locks, closing reports and reviewed operational requests |
+| Rooms | School ownership, bulk import, row/column geometry, disabled seats, usable-seat totals and standalone layout XLSX export |
 | Examination cycles | Academic session, required student-batch selection, examination type, calendar dates, shifts and lifecycle status |
 | Date sheets | Manual/import scheduling, school-wise automatic generation, batch-derived current semesters, branch/batch/subject selection, holidays, flexible gaps, priorities, live validation, locking, moving, regeneration, approval, publication and branded XLSX/detailed CSV export |
-| Seating | Versioned generation, room capacity use, seat allocation and unallocated-student reporting |
-| Attendance | Room-wise attendance sheets, marking and correction support |
-| Invigilation | Faculty duty allocation, session conflict control and workload tracking |
-| Replacements | Replacement requests, approval status and replacement history |
+| Seating | Versioned paired-cohort allocation, school isolation, branch/paper separation, alternating-column fallback, capacity exceptions and university-format XLSX/print output |
+| Attendance | Room-wise sheets and workbooks, attendance/UFM recording, revision checks, submission locks and reviewed corrections |
+| Invigilation | Two invigilators per occupied room, missing-duty top-up, workload-based allocation, concurrent-request protection and cross-cycle/overnight conflict checks |
+| Replacements | Faculty/coordinator requests, reviewer-selected replacements, availability checks, approval/rejection and retained duty history |
 | Reports | Seating, attendance, date-sheet and operational CSV/print outputs |
 | Governance | Eight application roles, CSRF protection, session control and audit logs |
 
@@ -65,7 +74,21 @@ The system is designed for Gautam Buddha University and follows its school, prog
 
 Student year, semester and session now advance automatically from the academic calendar, with term history, core-course registrations and individual exceptions. The new **Academic progression** screen provides calendar settings, future previews, current reconciliation and completion review. See [Academic progression operations](docs/ACADEMIC-PROGRESSION.md) for the upgrade, daily task and exception rules.
 
+The default boundaries are **1 July** for a new academic session/odd semester and **1 January** for the even semester. Progression follows admission batch, programme duration and individual controls; it does not infer examination results. Holds and semester delays are supported, withdrawn students are excluded from regular cohorts, and students beyond normal programme duration await explicit completion verification. Historical examination placements, published eligibility, seating and attendance remain intact.
+
+Core/common/bridge registrations follow matching active curriculum. A department elective selected for a regular date sheet registers the matching class; unscheduled alternatives are not assigned automatically. Back papers require explicit registrations. Missing curriculum is reported rather than invented.
+
 ## Latest updates
+
+- **Faculty records and imports:** faculty creation/editing and CSV/XLSX imports share validation for active school, name, designation, required unique email, optional Indian mobile number and active/inactive status. Email is normalized; mobile numbers may be shared. New employee IDs are generated internally, while existing IDs and operational links are preserved. A downloadable template and normalized preview support the new format.
+
+- **Two invigilators per room:** allocation fills each occupied published-seating room to two distinct active invigilators. Existing assignments are retained, retries add no duplicate duties, and legacy one-teacher rooms can be topped up. Coverage counts invigilator/senior-invigilator duties; observer duties do not satisfy room coverage. The queue shows covered rooms, missing-teacher actions, attendance links and completed coverage states.
+
+- **Conflict-safe faculty operations:** allocation, availability changes and replacement approvals check actual examination times across cycles, including overnight overlaps. Concurrent operations lock faculty consistently. Faculty shortages roll back the allocation rather than saving a partial roster or changing workload counters.
+
+- **Reviewed replacements:** coordinators can request a replacement with an optional suggestion, then select an active replacement when approving. Conflicting or unavailable faculty are rejected. The original duty stays assigned until approval; approval retains the old duty and creates the replacement assignment. Cancelled/replaced duties cannot expose student records through the faculty panel. The request register supports pending/approved/rejected filters.
+
+- **Faculty self-service:** linked faculty accounts can acknowledge duties, mark assigned-room attendance, record UFM details, submit and lock attendance, send correction/availability/replacement requests and complete room-closing reports. Coordinator review controls reopening and operational changes.
 
 - **Bulk student deletion:** open **Students → Bulk delete**, choose school, department, branch/programme, or all students, and review the matched/deletable/protected counts across all pages. Canonical master mappings and exact department/branch names saved on student records are available. A short-lived preview token and typed count confirmation limit deletion to the previewed group. Examination-linked students are retained; deletable students’ dependent progression/history rows follow the existing cascade policy. Successful deletions are audited and failures roll back.
 
@@ -75,11 +98,9 @@ Student year, semester and session now advance automatically from the academic c
 
 - **No-pair fallback:** **Groups without a pair → Alternate columns · partner stays empty** is the default. Multiple unmatched groups can be seated without a valid year/branch/paper partner, using one usable column per empty column pair. Existing paired columns are preserved. The preview reports reserved columns, and saved-plan validation prevents filling them. Capacity shortages remain visible for review.
 
-- **Year-based automatic pairing:** choose both patterns, 1st ↔ 3rd only, or 2nd ↔ final only, then auto-pair and generate. Final year follows the partner programme’s semester duration. Different-branch and neighbour checks remain mandatory. Shared course IDs or normalized course codes anywhere on the same examination day, including another shift, block pairing; previews, manual corrections, and publication checks apply the same policy to new plans.
-
 - **Room geometry Excel export:** each room card and seat-map page offers **Download layout Excel**, with the saved seat labels, blocked-position shading, desk/aisle layout, whiteboard and invigilator landmarks, capacity information, and landscape printing. It works before any seating allocation is generated.
 
-- **Different papers for neighbouring students:** the automatic planner checks the shared course/paper identity within the selected date and shift, even when branches have separate examination records. Groups sharing a paper are excluded from pair suggestions. Neighbouring seat checks, safe remainder placement, manual corrections, and publication validation enforce this rule for new plans.
+- **Different papers for neighbouring students:** the automatic planner checks shared course/paper identity across the examination day, including another shift and separate branch examination records. Groups sharing a paper are excluded from pair suggestions. Neighbouring seat checks, safe remainder placement, manual corrections, and publication validation enforce the saved policy for new plans.
 
 - **Branch separation in automatic seating:** suggestions and manual selections in the automatic planner pair different programmes only, including across batches and years. Allocation checks adjacent positions and desk partners in the saved usable room layout, swaps pair orientation when needed, and leaves unsafe leftover seats empty. New plans record this rule for publication validation; older saved versions keep their existing policy.
 
@@ -94,6 +115,58 @@ The current revision adds the following operational and UI improvements:
 - **Selection-safe scheduling UI:** filtering branches, batches and semesters no longer resets deliberate subject selections.
 - **Official Excel output:** published date sheets and generated scheduling runs can be exported as formatted `.xlsx` workbooks with the university identity, frozen headings, print layout and programme/batch/semester matrix.
 - **Navigation refinement:** switching the desktop sidebar off now removes it completely, expands the workspace to full width and prevents hidden links from receiving keyboard focus. Mobile navigation remains an off-canvas drawer.
+
+## Faculty records and bulk import
+
+Use **Faculty → Add faculty** for individual records or **Bulk import** for CSV/XLSX files. Download the current template from the import page:
+
+```csv
+Name,School,Designation,Email,Mobile Number,Status
+Sample Faculty,ICT,Assistant Professor,faculty@example.com,9876543210,active
+```
+
+- School accepts an active school's code, name or short name.
+- Name, school, designation, valid email and status are required. Email must be unique across faculty records and within the import.
+- Mobile Number is optional, including omission of the column. Supplied numbers are normalized from supported Indian formats and validated as ten-digit mobile numbers. Shared mobile numbers are allowed.
+- Status is `active` or `inactive`. Employee IDs are generated internally for new records; editing preserves existing IDs and duty/account links.
+- Review valid/invalid rows and normalized values before committing. Existing email matches are validation errors, not implicit updates.
+
+Existing installations need the [faculty email upgrade](#upgrading-an-existing-installation) to enforce uniqueness in the database. Legacy missing emails remain until edited; new and edited records require a valid email.
+
+## Invigilation and replacements
+
+Publish a seating plan before allocating duties. **Invigilation** lists sessions, occupied rooms and the number of rooms with complete coverage. Each occupied room requires **two distinct active faculty members** with invigilator or senior-invigilator duties; observers do not count toward coverage.
+
+**Auto-allocate** chooses available active faculty in workload order. **Allocate missing teachers** fills only missing positions, preserving existing assignments. Fully covered sessions show **All rooms covered**. Repeating allocation is safe. If insufficient faculty are available, the operation reports the shortage and rolls back its new assignments and workload updates.
+
+Conflicts use actual start/end times across examination cycles, including overnight duties and overlapping unavailability. Adjacent sessions that do not overlap are allowed. A retained duty record for the same faculty/date/shift also prevents duplicate assignment. Unavailability cannot be approved or saved over an existing overlapping duty; reassign the duty first.
+
+In **Replacement requests**, choose an active duty, record a reason and optionally suggest another active faculty member. Reviewers must select a replacement before approval. The server checks availability and overlapping duties again during approval. Approval cancels the original duty and creates a new assignment; rejection leaves the original assignment intact. Duplicate pending requests and repeated reviews are rejected. Filters expose pending, approved and rejected history, and the duty chart can be printed.
+
+## Faculty self-service portal
+
+An administrator links a user account to an active faculty record in **Users and roles**. Faculty sign-in opens the personal panel, scoped to that faculty member's duties.
+
+- View and acknowledge duties; acknowledgment does not mark student attendance.
+- Open assigned-room attendance within the configured window, record attendance and UFM information, and submit the room sheet. Revision checks reject stale updates.
+- Submitted attendance is locked. A correction request requires coordinator approval to reopen it for a limited period.
+- Submit a room-closing report with answer-book counts, handover, remarks and incident information.
+- Request replacement or availability changes without silently changing an existing duty.
+- Change the account password from the profile.
+
+Authorized reviewers use **Faculty operations** to review requests and configure attendance settings. Cancelled or replaced duties no longer grant access to the room's student records. See `app/Faculty/FacultyPortalService.php` for the enforced access and submission rules.
+
+## Rooms and seating plans
+
+Each room belongs to a school. New rooms require explicit ownership; room imports accept School Code or a default school for older files. Student school is resolved from the canonical programme mapping. Unassigned rooms, inactive schools, inactive/maintenance rooms and blocked positions cannot supply usable seats. Spare seats in another school do not resolve a shortage.
+
+For automatic seating, select a published examination session and pair compatible **different branches within the same school**, in any batch or year. Groups sharing a paper anywhere on the examination day are incompatible. Each pair reserves equal counts, surplus students remain available for subsequent pairs, and pair order controls allocation order. Preferred rooms are tried first, then other eligible rooms in the same school; different pairs can use remaining desk pairs.
+
+The default unmatched-group fallback uses alternating columns with empty partner columns. These deliberately reserved positions remain protected in the preview, manual correction and publication checks. Capacity shortages remain in the unallocated report and prevent publication. Manual draft corrections require a reason. Published/superseded plans preserve their saved policy and assignments; regenerate to create a new version.
+
+**Download layout Excel** exports a room's geometry without needing a seating allocation. Seating XLSX and print views use the university seating form, physical seat positions, desk/aisle landmarks, programme/batch summaries and accurate roll ranges. Earlier manual/year-based plans may retain older rules; the current automatic planner does not require first/third-year or second/final-year pairing patterns.
+
+See [room school setup](docs/ROOM-SCHOOLS.md) for ownership upgrades. [Paired seating notes](docs/PAIRED-SEATING.md) describe the original manual-room workflow and export format; use the rules above for the current automatic planner.
 
 ## Automatic date-sheet scheduling
 
@@ -249,7 +322,7 @@ flowchart LR
     A[Apache / OpenResty]
     F[public/index.php<br/>Front controller]
     APP[Application routing<br/>Authentication and policies]
-    S[Domain services<br/>Academic · Import · Exams · Export · Rooms · Seating]
+    S[Domain services<br/>Academic · Import · Exams · Export · Rooms · Seating · Faculty]
     V[PHP views<br/>Responsive university UI]
     M[(MariaDB / MySQL)]
     FS[(Temporary uploads<br/>Exports and logs)]
@@ -273,10 +346,13 @@ Auto-Exam-Main/
 │   ├── Auth/           Authentication and role policies
 │   ├── Exams/          Examination scheduling services
 │   ├── Export/         Dependency-free formatted XLSX generation
+│   ├── Faculty/        Faculty portal, record validation, invigilation and migrations
 │   ├── Foundation/     Application, database, session and environment
+│   ├── Http/           Request and response abstractions
 │   ├── Import/         CSV/XLSX staging, validation and commit services
 │   ├── Rooms/          Physical seat generation
 │   ├── Seating/        Seating allocation engine
+│   ├── Support/        Shared application helpers
 │   └── View/           View rendering
 ├── bootstrap/          Application bootstrap and autoloading
 ├── config/             Application and database configuration
@@ -303,11 +379,11 @@ Auto-Exam-Main/
 | Academic Coordinator | Academic masters, curriculum and student records |
 | Seating Coordinator | Rooms, disabled seats, layouts, seating generation and reports |
 | Invigilation Coordinator | Faculty, availability, duties, replacements and attendance operations |
-| Faculty / Invigilator | Restricted authenticated faculty dashboard |
+| Faculty / Invigilator | Personal duties, assigned-room attendance, closing reports and reviewed requests |
 | Audit and Compliance Viewer | Read-only reports and audit history |
 | Authorized Read-only Viewer | Dashboard and published operational reports |
 
-Routes are checked against explicit permissions including `academic.manage`, `students.manage`, `rooms.manage`, `exams.manage`, `seating.manage`, `attendance.manage`, `invigilation.manage`, `reports.view`, `audit.view` and `users.manage`.
+Routes are checked against explicit permissions including `academic.manage`, `students.manage`, `faculty.manage`, `rooms.manage`, `exams.manage`, `seating.manage`, `attendance.manage`, `invigilation.manage`, `reports.view`, `audit.view`, `users.manage`, `faculty.self` and `faculty.review`. Faculty self-service additionally checks the linked faculty identity and assigned duty; review actions require coordinator authorization. Access is permission-based, including authorized non-administrator writes.
 
 ## Data conventions
 
@@ -382,7 +458,7 @@ The seed retains the 2023 curriculum as a historical baseline. Admission imports
 
 ### Requirements
 
-- PHP 8.2 or newer with PDO MySQL and ZIP support
+- PHP 8.2 or newer with PDO MySQL, ZIP/ZipArchive, SimpleXML and mbstring support
 - MariaDB 10.4+ or MySQL 8+
 - Apache with `mod_rewrite`
 - XAMPP is recommended for Windows development
@@ -427,6 +503,21 @@ DB_PASSWORD=
 
 Never commit the live `.env` file or database credentials.
 
+## Upgrading an existing installation
+
+Back up the database before applying upgrades. Do not import the clean-install schema over operational records. Apply the additive upgrades relevant to the installation:
+
+```powershell
+C:\xampp\php\php.exe database\upgrade-academic-rollover.php
+C:\xampp\php\php.exe database\migrate-faculty-portal.php
+C:\xampp\php\php.exe database\upgrade-room-schools.php
+C:\xampp\php\php.exe database\upgrade-faculty-email.php
+```
+
+The faculty email upgrade saves faculty records and table definition under `storage/backups/` when an index change is needed. It normalizes existing emails, adds the unique email index and removes a legacy unique mobile index if present. Duplicate normalized emails stop the upgrade before records are changed; resolve those conflicts explicitly. Missing legacy emails are retained as null, and mobile numbers remain optional and shareable. Existing faculty IDs, duties and account links are retained. Fresh installations already include the unique email index in `database/schema.sql`.
+
+For daily academic progression, run `tools/install-academic-rollover-task.ps1` on Windows or configure the host scheduler to run `php /absolute/project/path/tools/academic-rollover.php`. The Windows task runs at 00:15 while the installing user is signed in; MySQL and the machine must be available. Authorized application traffic also catches up after missed runs. Use `php tools/academic-rollover.php --preview` for CLI diagnostics and the progression screen for future-date previews.
+
 ## InfinityFree deployment
 
 Build the hosting package:
@@ -450,18 +541,19 @@ Use the application import screens for operational data:
 
 - **Programmes** — owning school, three-letter programme code, programme name, level, duration, flags and status.
 - **Students** — identifiers, session, programme, school, semester, section and contact information.
-- **Faculty** — faculty identity, school association and availability data.
+- **Faculty** — name, active school, designation, required unique email, optional mobile number and status; use the current downloadable template.
 - **Courses** — programme/branch, subject code and name, credits, UG/PG level, course year, semester, category, examination duration and priority.
 - **Rooms** — room geometry, allocation order, priority and optional disabled seat coordinates.
 
 ## Testing
 
-Run parser and role-policy tests:
+Tests are standalone PHP scripts. Run them from the project root with assertions enabled. Parser, policy and export examples:
 
 ```powershell
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\RollNumberParserTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\RolePolicyTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\BatchProgressionTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\AcademicCalendarTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\WrittenPaperPolicyTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\XlsxExporterTest.php
 ```
@@ -481,9 +573,36 @@ C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\PreferredG
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\SoictSchedulingTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\CourseDeletionTest.php
 C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\ExamCycleDeletionTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\AcademicRolloverTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\SchedulingAcademicSessionTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\DepartmentElectiveTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\StudentBulkDeletionTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\SchoolRoomSeatingTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\PairedSeatingTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\AutomaticPairedSeatingTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\FacultyImportTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\FacultyPortalTest.php
+C:\xampp\php\php.exe -d zend.assertions=1 -d assert.exception=1 tests\InvigilationTest.php
 ```
 
-Database-backed tests create isolated temporary databases and remove them after completion.
+Database-backed tests create isolated temporary databases and remove them after completion; the database account needs permission to create/drop test databases. Inspect test setup before running against a configured environment.
+
+Recent regression coverage includes:
+
+| Area | Checks |
+|---|---|
+| Faculty imports | CSV/XLSX, required unique email, optional/shared mobile, normalized values, generated IDs, commit guard, manual forms and template |
+| Faculty portal | Linked-duty access, attendance windows/revisions, submission and correction locks, reports and cancelled/replaced duty restrictions |
+| Invigilation | Two-teacher coverage, retries, legacy top-up, shortage rollback, cross-cycle/overnight conflicts, availability, replacements, concurrent requests, CSRF and permissions |
+| Academic and seating | Calendar boundaries, historical placement, electives, school isolation, pairing, unallocated students and saved-plan rules |
+
+An optional browser check uses HTML fixtures generated by `InvigilationTest.php`. With Node.js, a resolvable `playwright` module and installed Google Chrome available, run:
+
+```powershell
+node tests\InvigilationBrowserTest.cjs
+```
+
+It checks allocation controls, room coverage, attendance links, replacement selection/status filters and responsive layouts, and writes screenshots under `outputs/invigilation/`. It checks the rendered fixtures; it does not exercise live browser submissions. The repository does not currently include a Node package manifest to install this optional dependency automatically.
 
 ## Security
 
@@ -495,12 +614,14 @@ Database-backed tests create isolated temporary databases and remove them after 
 - Operational changes are retained in the audit log.
 - Output is HTML-escaped through shared view helpers.
 - Database access uses PDO prepared statements and transactions.
+- Faculty attendance is scoped to assigned duties, with revision checks and submission locks; cancelled/replaced duties lose room-record access.
+- Invigilation allocation and reviewed availability/replacement changes use transactional faculty locking to prevent conflicting concurrent assignments.
 
 Before production use, change temporary credentials, keep `APP_DEBUG=false`, use HTTPS, protect the hosting account and retain encrypted database backups outside the public web root.
 
 ## Reporting and printing
 
-Print actions use the browser print dialog; choose **Save as PDF** for official PDF output. Date sheets also provide a formatted Excel workbook, while detailed operational exports remain UTF-8-compatible CSV files. Always review the university header, school, examination cycle, programme/batch/semester labels, dates, shifts, rooms and publication status before distribution.
+Print actions use the browser print dialog; choose **Save as PDF** for official PDF output. Date sheets and scheduling runs provide formatted Excel workbooks. Room geometry, seating plans and attendance also have workbook exporters; detailed operational exports remain UTF-8-compatible CSV files. The invigilation screen offers a printable duty chart. Always review the university header, school, examination cycle, programme/batch/semester labels, dates, shifts, rooms and publication status before distribution.
 
 ---
 
@@ -508,8 +629,3 @@ Print actions use the browser print dialog; choose **Save as PDF** for official 
   <strong>Gautam Buddha University — Exam Scheduling and Management System</strong><br>
   Greater Noida, Uttar Pradesh, India
 </div>
-
-
-Room ownership is enforced by school. Choose a school when creating a room; room imports accept a School Code column or a default school for older files. Seating interleaves papers within each school and never uses another school’s spare seats. Manual corrections and publication enforce the same rule. See [room school setup](docs/ROOM-SCHOOLS.md) for existing installations.
-
-Seating generation now supports two selected branch/batch groups per room, including different years of the same branch. The print view and Excel download follow the supplied university seating form. See [paired seating](docs/PAIRED-SEATING.md) for the workflow and validation rules.

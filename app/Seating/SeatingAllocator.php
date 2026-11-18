@@ -11,6 +11,12 @@ final class SeatingAllocator
 {
     public function __construct(private readonly PDO $pdo) {}
 
+    public static function publishable(array $validation): bool
+    {
+        unset($validation['valid'], $validation['unallocated_students']);
+        return array_sum($validation) === 0;
+    }
+
     public function generate(int $cycleId,string $date,int $shiftId,array $roomIds,int $userId,string $seed,array $options=[]): array
     {
         if(!$roomIds)throw new RuntimeException('Select at least one examination room.');

@@ -34,7 +34,7 @@ final class FacultyPortalController
                 }
                 if($method==='GET'&&in_array($action,['','snapshot'],true)){
                     $duty=$service->duty($user,$id);
-                    if($duty['duty_status']==='cancelled'){if($json)throw new PortalException('This duty was cancelled or reassigned. Reload your duties.',403);return $this->view('faculty-panel/cancelled',compact('faculty','duty'));}
+                    if(in_array($duty['duty_status'],['cancelled','replaced'],true)){if($json)throw new PortalException('This duty was cancelled or reassigned. Reload your duties.',403);return $this->view('faculty-panel/cancelled',compact('faculty','duty'));}
                     $data=$service->room($user,$id);
                     if($action==='snapshot')return Response::json(['revision'=>(int)$data['state']['revision'],'state'=>$data['state'],'records'=>$data['records'],'window'=>$data['window']]);
                     return $this->view('faculty-panel/room',$data+compact('faculty'));
@@ -53,7 +53,7 @@ final class FacultyPortalController
             }
             if($method==='GET'&&in_array($path,['/faculty-panel','/faculty-panel/duties','/faculty-panel/attendance','/faculty-panel/reports'],true)){
                 $duties=$service->duties($user);$today=$service->now()->format('Y-m-d');$settings=$service->settings();$tab=basename($path);
-                $next=null;foreach($duties as $d)if($d['exam_date']>=$today&&!in_array($d['duty_status'],['cancelled','completed'],true)&&$d['exam_date'].' '.$d['end_time']>=$service->now()->format('Y-m-d H:i:s')){$next=$d;break;}
+                $next=null;foreach($duties as $d)if($d['exam_date']>=$today&&!in_array($d['duty_status'],['cancelled','replaced','completed'],true)&&$d['exam_date'].' '.$d['end_time']>=$service->now()->format('Y-m-d H:i:s')){$next=$d;break;}
                 return $this->view('faculty-panel/home',compact('faculty','duties','today','settings','tab','next'));
             }
             throw new PortalException('Faculty page not found.',404);

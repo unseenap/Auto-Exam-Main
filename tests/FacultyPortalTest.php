@@ -60,6 +60,9 @@ try{
     $service->availability(2,'2026-11-04',$shift,'unavailable','Medical appointment');$availability2=(int)$pdo->query('SELECT MAX(id) FROM faculty_availability_requests')->fetchColumn();$service->review(6,'availability',$availability2,true);fpCheck((int)$pdo->query('SELECT COUNT(*) FROM faculty_availability')->fetchColumn()===1,'Availability not applied');
     $service->replacement(2,1,'Cannot attend the shift');$request=(int)$pdo->query('SELECT id FROM replacement_requests LIMIT 1')->fetchColumn();fpCheck($service->duty(2,1)['duty_status']==='assigned','Pending replacement removed original duty');fpReject(fn()=>$service->review(6,'replacement',$request,true),'Choose an active');$service->review(6,'replacement',$request,true,4);
     fpReject(fn()=>$service->room(2,1),'cancelled',403);fpReject(fn()=>$service->mark(2,1,1,'absent','',7),'cancelled',403);fpCheck(count($service->duties(8))===1,'Approved replacement did not receive new duty');
+    $pdo->exec("UPDATE invigilation_allocations SET duty_status='replaced' WHERE id=1");
+    fpReject(fn()=>$service->room(2,1),'reassigned',403);
+    fpReject(fn()=>$service->mark(2,1,1,'absent','',7),'replaced',403);
     fpReject(fn()=>$service->coordinatorAttendance(7,1,[1=>'absent'],[1=>7]),'authorized',403);
     $service->changePassword(8,'SyntheticPassword12!','NewSyntheticPassword12!','NewSyntheticPassword12!');fpCheck(password_verify('NewSyntheticPassword12!',$pdo->query('SELECT password_hash FROM users WHERE id=8')->fetchColumn()),'Password change failed');
     // Exercise real route permission checks, CSRF and object ownership.

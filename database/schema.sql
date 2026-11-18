@@ -163,6 +163,7 @@ CREATE TABLE faculty (
   duty_count INT UNSIGNED NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_faculty_email (email),
   CONSTRAINT fk_faculty_school FOREIGN KEY (school_id) REFERENCES schools(id),
   CONSTRAINT fk_faculty_department FOREIGN KEY (department_id) REFERENCES departments(id)
 ) ENGINE=InnoDB;

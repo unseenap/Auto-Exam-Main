@@ -145,6 +145,7 @@ final class Application
         }
         if (preg_match('#^/students/(\d+)/delete$#', $path, $matches) === 1 && $method === 'POST') return $this->deleteMasterRecord($request,'students',(int)$matches[1],'students','student');
         if ($path === '/faculty' && $method === 'POST') return $this->saveFaculty($request);
+        if ($path === '/faculty/import/template.csv' && $method === 'GET') return Response::csv("Name,School,Designation,Email,Mobile Number,Status\r\nSample Faculty,ICT,Assistant Professor,faculty@example.com,9876543210,active\r\n",'faculty-import-template.csv');
         if ($path === '/faculty/import' && $method === 'POST') return $this->stageFacultyImport($request);
         if (preg_match('#^/faculty/import/(\d+)/commit$#', $path, $matches) === 1 && $method === 'POST') return $this->commitFacultyImport($request,(int)$matches[1]);
         if (preg_match('#^/faculty/import/(\d+)$#', $path, $matches) === 1 && $method === 'GET') return Response::html(View::render('faculty/import-preview',$this->facultyImportPreview((int)$matches[1])));
@@ -200,6 +201,7 @@ final class Application
         if(preg_match('#^/seating/(\d+)/publish$#',$path,$matches)===1&&$method==='POST')return $this->publishSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/move$#',$path,$matches)===1&&$method==='POST')return $this->moveSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/assign-unallocated$#',$path,$matches)===1&&$method==='POST')return $this->assignUnallocated($request,(int)$matches[1]);
+        if(preg_match('#^/seating/(\d+)/allocate-remaining$#',$path,$matches)===1&&$method==='POST')return $this->allocateRemainingSeating($request,(int)$matches[1]);
         if(preg_match('#^/seating/(\d+)/export.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->seatingPlanXlsx((int)$matches[1]);
         if(preg_match('#^/seating/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('seating/preview',$this->seatingPreviewData((int)$matches[1])));
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('attendance/sheet',$this->attendanceSheetData((int)$matches[1])));
@@ -552,18 +554,19 @@ final class Application
     private function saveFaculty(Request $request,?int $id=null): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('faculty'));
-        $data=['school_id'=>(int)$request->input('school_id'),'department_id'=>null,'employee_id'=>trim((string)$request->input('employee_id')),
-            'name'=>trim((string)$request->input('name')),'designation'=>trim((string)$request->input('designation')),
-            'email'=>trim((string)$request->input('email'))?:null,'phone'=>trim((string)$request->input('phone'))?:null,
-            'status'=>(string)$request->input('status','active')];$errors=[];
-        if(!$data['school_id'])$errors['school_id']='School is required.';if($data['employee_id']==='')$errors['employee_id']='Employee ID is required.';if($data['name']==='')$errors['name']='Name is required.';
+        $pdo=$this->database->connection();
+        $data=\App\Faculty\FacultyRecord::normalize([
+            'school_id'=>$request->input('school_id'),'name'=>$request->input('name'),
+            'designation'=>$request->input('designation'),'email'=>$request->input('email'),
+            'phone'=>$request->input('phone'),'status'=>$request->input('status','active')]);
+        $errors=\App\Faculty\FacultyRecord::errors($pdo,$data,$id);
         if($errors){$this->session->flash('errors',$errors);$this->session->flash('old',$data);return Response::redirect($id?url("faculty/{$id}/edit"):url('faculty/create'));}
         $pdo=$this->database->connection();try{$pdo->beginTransaction();
-            if($id){$sql='UPDATE faculty SET school_id=:school_id,department_id=:department_id,employee_id=:employee_id,name=:name,designation=:designation,email=:email,phone=:phone,status=:status WHERE id=:id';$data['id']=$id;}
-            else{$sql='INSERT INTO faculty(school_id,department_id,employee_id,name,designation,email,phone,status) VALUES(:school_id,:department_id,:employee_id,:name,:designation,:email,:phone,:status)';}
+            if($id){$sql='UPDATE faculty SET school_id=:school_id,name=:name,designation=:designation,email=:email,phone=:phone,status=:status WHERE id=:id';$data['id']=$id;}
+            else{$data['department_id']=null;$data['employee_id']=\App\Faculty\FacultyRecord::employeeId();$sql='INSERT INTO faculty(school_id,department_id,employee_id,name,designation,email,phone,status) VALUES(:school_id,:department_id,:employee_id,:name,:designation,:email,:phone,:status)';}
             $pdo->prepare($sql)->execute($data);$entity=$id?:((int)$pdo->lastInsertId());$this->audit($pdo,$id?'faculty.updated':'faculty.created','faculty',$entity,$data);$pdo->commit();
             $this->session->flash('success',$id?'Faculty record updated.':'Faculty record created.');return Response::redirect(url('faculty'));
-        }catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('errors',['employee_id'=>'Employee ID must be unique.']);$this->session->flash('old',$data);return Response::redirect($id?url("faculty/{$id}/edit"):url('faculty/create'));}
+        }catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();$this->session->flash('errors',['save'=>($e instanceof \PDOException && ($e->errorInfo[1]??0)===1062)?'Email already belongs to another faculty record.':'Unable to save the faculty record. Please try again.']);$this->session->flash('old',$data);return Response::redirect($id?url("faculty/{$id}/edit"):url('faculty/create'));}
     }
 
     private function roomData(Request $request): array
@@ -1067,15 +1070,30 @@ final class Application
 
     private function publishSeating(Request $request,int $id): Response
     {
-        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('seating/'.$id));$pdo=$this->database->connection();$validation=(new SeatingAllocator($pdo))->validate($id);
-        if(!$validation['valid']){$this->session->flash('error','Allocation validation failed and cannot be published.');return Response::redirect(url('seating/'.$id));}
-        $pdo->beginTransaction();try{$q=$pdo->prepare('SELECT cycle_id,exam_date,shift_id FROM seating_allocations WHERE id=:id FOR UPDATE');$q->execute(['id'=>$id]);$a=$q->fetch(PDO::FETCH_ASSOC);
-            $pdo->prepare("UPDATE seating_allocations SET status='superseded' WHERE cycle_id=:cycle AND exam_date=:date AND shift_id=:shift AND status='published'")->execute(['cycle'=>$a['cycle_id'],'date'=>$a['exam_date'],'shift'=>$a['shift_id']]);
-            $pdo->prepare("UPDATE seating_allocations SET status='published',published_at=NOW() WHERE id=:id")->execute(['id'=>$id]);
-            $pdo->prepare("INSERT IGNORE INTO attendance(allocation_id,examination_id,room_id,student_id,status)
-                SELECT allocation_id,examination_id,room_id,student_id,'unmarked' FROM seating_assignments WHERE allocation_id=:id")->execute(['id'=>$id]);
-            $pdo->commit();$this->session->flash('success','Seating plan published and attendance sheets generated.');}
-        catch(\Throwable $e){$pdo->rollBack();$this->session->flash('error',$e->getMessage());}return Response::redirect(url('seating/'.$id));
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('seating/'.$id));
+        try{
+            $remaining=(new \App\Seating\SeatingPublicationService($this->database->connection()))
+                ->publish($id,(int)$this->auth->user()['id']);
+            $message='Seating plan published and attendance sheets generated.';
+            if($remaining)$message.=' '.$remaining.' students remain in Remaining allocation for later seating.';
+            $this->session->flash('success',$message);
+        }catch(\Throwable $error){
+            $this->session->flash('error',$error->getMessage());
+        }
+        return Response::redirect(url('seating/'.$id));
+    }
+
+    private function allocateRemainingSeating(Request $request,int $id): Response
+    {
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('seating/'.$id));
+        try{
+            $result=(new \App\Seating\SeatingPublicationService($this->database->connection()))
+                ->allocateRemaining($id,(int)$this->auth->user()['id']);
+            $this->session->flash('success',$result['assigned'].' additional students seated. '.$result['remaining'].' students remain for allocation.');
+        }catch(\Throwable $error){
+            $this->session->flash('error',$error->getMessage());
+        }
+        return Response::redirect(url('seating/'.$id));
     }
 
     private function attendanceData(): array
@@ -1127,27 +1145,57 @@ final class Application
 
     private function invigilationData(): array
     {
+        $required=\App\Faculty\InvigilationService::INVIGILATORS_PER_ROOM;
         $pdo=$this->database->connection();return ['sessions'=>$pdo->query("SELECT sa.id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,
-            COUNT(DISTINCT ss.room_id) AS room_count,(SELECT COUNT(*) FROM invigilation_allocations ia WHERE ia.cycle_id=sa.cycle_id AND ia.exam_date=sa.exam_date AND ia.shift_id=sa.shift_id AND ia.duty_status<>'cancelled') AS duty_count
+            COUNT(DISTINCT ss.room_id) AS room_count,
+            COUNT(DISTINCT CASE WHEN (
+                SELECT COUNT(DISTINCT ia.faculty_id) FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id
+                WHERE ia.cycle_id=sa.cycle_id AND ia.exam_date=sa.exam_date AND ia.shift_id=sa.shift_id
+                AND ia.room_id=ss.room_id AND ia.duty_status IN ('assigned','confirmed','completed')
+                AND ia.duty_role IN ('invigilator','senior_invigilator') AND f.status='active'
+            ) >= {$required} THEN ss.room_id END) AS covered_rooms,
+            (SELECT COUNT(*) FROM invigilation_allocations ia WHERE ia.cycle_id=sa.cycle_id AND ia.exam_date=sa.exam_date AND ia.shift_id=sa.shift_id AND ia.duty_status IN ('assigned','confirmed','completed')) AS duty_count
             FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id JOIN seating_assignments ss ON ss.allocation_id=sa.id WHERE sa.status='published' GROUP BY sa.id ORDER BY sa.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),
-            'duties'=>$pdo->query("SELECT ia.*,f.name AS faculty_name,f.employee_id,r.code AS room_code,es.name AS shift_name,ec.name AS cycle_name FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id JOIN rooms r ON r.id=ia.room_id JOIN exam_shifts es ON es.id=ia.shift_id JOIN exam_cycles ec ON ec.id=ia.cycle_id WHERE ia.duty_status<>'cancelled' ORDER BY ia.exam_date DESC,es.sequence_no,r.code")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+            'duties'=>$pdo->query("SELECT ia.*,f.name AS faculty_name,f.employee_id,r.code AS room_code,es.name AS shift_name,ec.name AS cycle_name FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id JOIN rooms r ON r.id=ia.room_id JOIN exam_shifts es ON es.id=ia.shift_id JOIN exam_cycles ec ON ec.id=ia.cycle_id WHERE ia.duty_status IN ('assigned','confirmed','completed') ORDER BY ia.exam_date DESC,es.sequence_no,r.code")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function allocateInvigilators(Request $request,int $allocationId): Response
     {
-        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('invigilation'));$pdo=$this->database->connection();$q=$pdo->prepare('SELECT cycle_id,exam_date,shift_id FROM seating_allocations WHERE id=:id AND status=\'published\'');$q->execute(['id'=>$allocationId]);$session=$q->fetch(PDO::FETCH_ASSOC);if(!$session){$this->session->flash('error','Published seating session not found.');return Response::redirect(url('invigilation'));}
-        $q=$pdo->prepare('SELECT DISTINCT room_id FROM seating_assignments WHERE allocation_id=:id ORDER BY room_id');$q->execute(['id'=>$allocationId]);$rooms=$q->fetchAll(PDO::FETCH_COLUMN);$faculty=$pdo->prepare("SELECT f.id FROM faculty f WHERE f.status='active' AND NOT EXISTS(SELECT 1 FROM faculty_availability fa WHERE fa.faculty_id=f.id AND fa.exam_date=:date AND fa.shift_id=:shift AND fa.availability='unavailable') AND NOT EXISTS(SELECT 1 FROM invigilation_allocations ia WHERE ia.faculty_id=f.id AND ia.exam_date=:date2 AND ia.shift_id=:shift2 AND ia.duty_status<>'cancelled') ORDER BY f.duty_count,f.name");$faculty->execute(['date'=>$session['exam_date'],'shift'=>$session['shift_id'],'date2'=>$session['exam_date'],'shift2'=>$session['shift_id']]);$available=$faculty->fetchAll(PDO::FETCH_COLUMN);
-        if(count($available)<count($rooms)){$this->session->flash('error','Not enough available faculty for all rooms.');return Response::redirect(url('invigilation'));}$pdo->beginTransaction();try{$insert=$pdo->prepare("INSERT INTO invigilation_allocations(cycle_id,exam_date,shift_id,room_id,faculty_id,duty_status,assigned_by) VALUES(:cycle,:date,:shift,:room,:faculty,'assigned',:user)");foreach($rooms as $i=>$room){$insert->execute(['cycle'=>$session['cycle_id'],'date'=>$session['exam_date'],'shift'=>$session['shift_id'],'room'=>$room,'faculty'=>$available[$i],'user'=>$this->auth->user()['id']]);$pdo->prepare('UPDATE faculty SET duty_count=duty_count+1 WHERE id=:id')->execute(['id'=>$available[$i]]);}$pdo->commit();$this->session->flash('success',count($rooms).' invigilators allocated without conflicts.');}catch(\Throwable $e){$pdo->rollBack();$this->session->flash('error','Duties already exist for this session or a conflict was detected.');}return Response::redirect(url('invigilation'));
+        if(!$this->session->validCsrf((string)$request->input('_token'))){
+            $this->session->flash('error','Your session expired. Reload before allocating duties.');
+            return Response::redirect(url('invigilation'));
+        }
+        try{
+            $count=(new \App\Faculty\InvigilationService($this->database->connection()))
+                ->allocate($allocationId,(int)$this->auth->user()['id']);
+            $this->session->flash('success',$count
+                ?$count.' additional '.($count===1?'teacher assigned.':'teachers assigned.')
+                :'Every room already has two invigilators.');
+        }catch(\App\Faculty\PortalException $error){
+            $this->session->flash('error',$error->getMessage());
+        }
+        return Response::redirect(url('invigilation'));
     }
 
     private function replacementData(): array
     {
-        return ['requests'=>$this->database->connection()->query("SELECT rr.*,f.name AS original_name,rf.name AS replacement_name,r.code AS room_code,ia.exam_date,es.name AS shift_name FROM replacement_requests rr JOIN invigilation_allocations ia ON ia.id=rr.duty_id JOIN faculty f ON f.id=ia.faculty_id LEFT JOIN faculty rf ON rf.id=rr.replacement_faculty_id JOIN rooms r ON r.id=ia.room_id JOIN exam_shifts es ON es.id=ia.shift_id ORDER BY rr.created_at DESC")->fetchAll(PDO::FETCH_ASSOC),'duties'=>$this->database->connection()->query("SELECT ia.id,ia.exam_date,es.name AS shift_name,r.code AS room_code,f.name AS faculty_name FROM invigilation_allocations ia JOIN exam_shifts es ON es.id=ia.shift_id JOIN rooms r ON r.id=ia.room_id JOIN faculty f ON f.id=ia.faculty_id WHERE ia.duty_status='assigned' ORDER BY ia.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),'faculty'=>$this->database->connection()->query("SELECT id,name FROM faculty WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success')];
+        return ['requests'=>$this->database->connection()->query("SELECT rr.*,f.name AS original_name,rf.name AS replacement_name,r.code AS room_code,ia.exam_date,es.name AS shift_name FROM replacement_requests rr JOIN invigilation_allocations ia ON ia.id=rr.duty_id JOIN faculty f ON f.id=ia.faculty_id LEFT JOIN faculty rf ON rf.id=rr.replacement_faculty_id JOIN rooms r ON r.id=ia.room_id JOIN exam_shifts es ON es.id=ia.shift_id ORDER BY rr.created_at DESC")->fetchAll(PDO::FETCH_ASSOC),'duties'=>$this->database->connection()->query("SELECT ia.id,ia.exam_date,es.name AS shift_name,r.code AS room_code,f.name AS faculty_name FROM invigilation_allocations ia JOIN exam_shifts es ON es.id=ia.shift_id JOIN rooms r ON r.id=ia.room_id JOIN faculty f ON f.id=ia.faculty_id WHERE ia.duty_status IN ('assigned','confirmed') ORDER BY ia.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),'faculty'=>$this->database->connection()->query("SELECT id,name FROM faculty WHERE status='active' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function requestReplacement(Request $request): Response
     {
-        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('replacements'));$this->database->connection()->prepare("INSERT INTO replacement_requests(duty_id,requested_by,reason,replacement_faculty_id,status) VALUES(:duty,:user,:reason,:faculty,'pending')")->execute(['duty'=>(int)$request->input('duty_id'),'user'=>$this->auth->user()['id'],'reason'=>trim((string)$request->input('reason')),'faculty'=>(int)$request->input('replacement_faculty_id')?:null]);$this->session->flash('success','Replacement request submitted.');return Response::redirect(url('replacements'));
+        if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('replacements'));
+        $pdo=$this->database->connection();
+        \App\Faculty\FacultyPortalMigration::apply($pdo);
+        try{
+            (new \App\Faculty\FacultyPortalService($pdo))->coordinatorReplacement(
+                (int)$this->auth->user()['id'],(int)$request->input('duty_id'),
+                (string)$request->input('reason'),(int)$request->input('replacement_faculty_id')?:null);
+            $this->session->flash('success','Replacement request submitted.');
+        }catch(\App\Faculty\PortalException $error){
+            $this->session->flash('error',$error->getMessage());
+        }
+        return Response::redirect(url('replacements'));
     }
 
     private function reviewReplacement(Request $request,int $id,string $decision): Response
@@ -1155,7 +1203,7 @@ final class Application
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('replacements'));
         $pdo=$this->database->connection();\App\Faculty\FacultyPortalMigration::apply($pdo);
         try{(new \App\Faculty\FacultyPortalService($pdo))->review((int)$this->auth->user()['id'],'replacement',$id,$decision==='approve',(int)$request->input('replacement_faculty_id')?:null);$this->session->flash('success','Replacement request '.$decision.'d.');}
-        catch(\App\Faculty\PortalException $e){$this->session->flash('success',$e->getMessage());}
+        catch(\App\Faculty\PortalException $e){$this->session->flash('error',$e->getMessage());}
         return Response::redirect(url('replacements'));
     }
 
@@ -1265,9 +1313,16 @@ final class Application
     private function saveFacultyAvailability(Request $request): Response
     {
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('faculty/availability'));
-        $data=['faculty'=>(int)$request->input('faculty_id'),'date'=>(string)$request->input('exam_date'),'shift'=>(int)$request->input('shift_id'),'availability'=>(string)$request->input('availability'),'reason'=>trim((string)$request->input('reason'))?:null];
-        if(!$data['faculty']||!$data['shift']||$data['date']===''||!in_array($data['availability'],['available','unavailable','preferred'],true)){$this->session->flash('error','Complete all availability fields.');return Response::redirect(url('faculty/availability'));}
-        $this->database->connection()->prepare("INSERT INTO faculty_availability(faculty_id,exam_date,shift_id,availability,reason) VALUES(:faculty,:date,:shift,:availability,:reason) ON DUPLICATE KEY UPDATE availability=VALUES(availability),reason=VALUES(reason)")->execute($data);$this->session->flash('success','Faculty availability saved.');return Response::redirect(url('faculty/availability'));
+        try{
+            (new \App\Faculty\InvigilationService($this->database->connection()))->saveAvailability(
+                (int)$this->auth->user()['id'],(int)$request->input('faculty_id'),
+                (string)$request->input('exam_date'),(int)$request->input('shift_id'),
+                (string)$request->input('availability'),(string)$request->input('reason'));
+            $this->session->flash('success','Faculty availability saved.');
+        }catch(\App\Faculty\PortalException $error){
+            $this->session->flash('error',$error->getMessage());
+        }
+        return Response::redirect(url('faculty/availability'));
     }
 
     private function userData():array
