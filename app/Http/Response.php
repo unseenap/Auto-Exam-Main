@@ -38,12 +38,13 @@ final class Response
             'Content-Disposition' => 'attachment; filename="' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $filename) . '"']);
     }
 
-    public static function xlsx(string $content, string $filename): self
+    public static function xlsx(string $content, string $filename, bool $private = false): self
     {
         return new self($content, 200, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'Content-Disposition' => 'attachment; filename="' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $filename) . '"',
             'Content-Length' => (string) strlen($content),
+            ...($private ? ['Cache-Control' => 'no-store, private', 'Pragma' => 'no-cache'] : []),
         ]);
     }
 

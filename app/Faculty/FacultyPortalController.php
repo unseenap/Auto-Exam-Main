@@ -17,8 +17,13 @@ final class FacultyPortalController
             if(str_starts_with($path,'/faculty-operations'))return $this->operations($request,$path,$service,$user);
             $faculty=$service->faculty($user);
             if($method==='POST'&&!$app->session()->validCsrf((string)$request->input('_token')))throw new PortalException('Your session expired. Reload the page before trying again.',403);
-            if(preg_match('#^/faculty-panel/duties/(\d+)(?:/(snapshot|mark|submit|acknowledge|replacement|correction|report))?$#',$path,$m)){
+            if(preg_match('#^/faculty-panel/duties/(\d+)(?:/(snapshot|mark|submit|acknowledge|replacement|correction|report|export\.xlsx))?$#',$path,$m)){
                 $id=(int)$m[1];$action=$m[2]??'';
+                if($method==='GET'&&$action==='export.xlsx'){
+                    $data=$service->room($user,$id);
+                    $bytes=(new \App\Export\AttendanceWorkbook($this->pdo))->build((int)$data['duty']['cycle_id'],(int)$data['allocation']['id'],(int)$data['duty']['room_id']);
+                    return Response::xlsx($bytes,'room-attendance-duty-'.$id.'.xlsx');
+                }
                 if($method==='POST'){
                     $revision=(int)$request->input('revision',-1);
                     switch($action){

@@ -12,7 +12,7 @@
         <label>Start date<input id="start-date" type="date" name="start_date" value="<?= $value('start_date') ?>" required></label><label>End date<input id="end-date" type="date" name="end_date" value="<?= $value('end_date') ?>" required></label>
       </div></section>
       <section class="cycle-form-block" aria-labelledby="batch-title"><header><span>Student scope</span><h2 id="batch-title">Batches included in this cycle</h2><p>Select the admission cohorts before creating the cycle. Scheduling and eligibility will remain restricted to these batches.</p></header>
-        <?php if($batches):?><fieldset class="cycle-batch-grid"><legend class="sr-only">Select student batches</legend><?php $oldBatchIds=array_map('intval',$old['batch_ids']??[]);foreach($batches as $batch):?><label><input type="checkbox" name="batch_ids[]" value="<?= (int)$batch['id'] ?>" <?= in_array((int)$batch['id'],$oldBatchIds,true)?'checked':'' ?>><span><strong><?= e($batch['label']) ?></strong><small><?= e($batch['programme_name']) ?></small></span></label><?php endforeach;?></fieldset><?php else:?><div class="generator-inline-empty">No active batches are available. Create programme batches before starting an examination cycle.</div><?php endif;?>
+        <?php if($batches):?><fieldset class="cycle-batch-grid"><legend class="sr-only">Select student batches</legend><label class="cycle-batch-all"><input type="checkbox" id="select-all-batches"><span><strong>Select all batches</strong></span></label><?php $oldBatchIds=array_map('intval',$old['batch_ids']??[]);foreach($batches as $batch):?><label><input type="checkbox" name="batch_ids[]" value="<?= (int)$batch['id'] ?>" <?= in_array((int)$batch['id'],$oldBatchIds,true)?'checked':'' ?>><span><strong><?= e($batch['label']) ?></strong><small><?= e($batch['programme_name']) ?></small></span></label><?php endforeach;?></fieldset><?php else:?><div class="generator-inline-empty">No active batches are available. Create programme batches before starting an examination cycle.</div><?php endif;?>
       </section>
       <section class="cycle-form-block" aria-labelledby="shift-title"><header><span>Session structure</span><h2 id="shift-title">Examination shifts</h2><p>Configure two non-overlapping sessions. Timings remain editable for every cycle.</p></header><div class="shift-editor">
         <fieldset><legend>First shift</legend><label>Shift name<input id="shift1-name" name="shift1_name" value="<?= $value('shift1_name','Morning Shift') ?>" required></label><div><label>Starts<input id="shift1-start" type="time" name="shift1_start" value="<?= $value('shift1_start','10:00') ?>" required></label><label>Ends<input id="shift1-end" type="time" name="shift1_end" value="<?= $value('shift1_end','11:30') ?>" required></label></div></fieldset>
@@ -22,5 +22,24 @@
     <aside class="cycle-summary"><div class="cycle-summary-logo"><img src="<?= e(url('assets/images/gbu-emblem.png')) ?>" alt="" width="48" height="48"><span>Cycle summary</span></div><h2 id="summary-name">New examination cycle</h2><dl><div><dt>Academic year</dt><dd id="summary-year">2025-26</dd></div><div><dt>Type</dt><dd id="summary-type">Mid-Semester</dd></div><div><dt>Date range</dt><dd id="summary-dates">Select dates</dd></div><div><dt>Duration</dt><dd id="summary-duration">90 minutes</dd></div><div><dt>Sessions</dt><dd id="summary-shifts">2 configured shifts</dd></div></dl><p>The cycle opens as a draft. Papers and student eligibility are added from its date sheet.</p><button class="cycle-create-button" type="submit"><span>Create calendar</span><b aria-hidden="true">→</b></button><a href="<?= e(url('exam-cycles')) ?>">Cancel and return</a></aside>
   </form>
 </div>
+<script>
+(() => {
+  const selectAll=document.getElementById('select-all-batches');
+  if(!selectAll)return;
+  const batches=[...document.querySelectorAll('#cycle-builder input[name="batch_ids[]"]')];
+  const update=()=>{
+    const selected=batches.filter(batch=>batch.checked).length;
+    selectAll.checked=selected===batches.length;
+    selectAll.indeterminate=selected>0&&selected<batches.length;
+  };
+  selectAll.addEventListener('change',()=>{
+    batches.forEach(batch=>batch.checked=selectAll.checked);
+    update();
+  });
+  batches.forEach(batch=>batch.addEventListener('change',update));
+  addEventListener('pageshow',update);
+  update();
+})();
+</script>
 <script>document.getElementById('start-date').addEventListener('change',event=>{const date=event.target.value;if(!date)return;const boundary=<?= json_encode($sessionStart) ?>;let year=Number(date.slice(0,4));if(date.slice(5)<boundary)year--;const field=document.getElementById('academic-year');field.value=`${year}-${year+1}`;field.dispatchEvent(new Event('input',{bubbles:true}));});</script>
 <script>(()=>{const form=document.getElementById('cycle-builder'),get=id=>document.getElementById(id),set=(id,text)=>get(id).textContent=text,types=get('exam-type');const update=()=>{set('summary-name',get('cycle-name').value.trim()||'New examination cycle');set('summary-year',get('academic-year').value.trim()||'Not entered');set('summary-type',types.options[types.selectedIndex].text);const start=get('start-date').value,end=get('end-date').value;set('summary-dates',start&&end?`${start} to ${end}`:'Select dates');set('summary-duration',`${get('duration').value||0} minutes`);const names=[get('shift1-name').value,get('shift2-name').value].filter(Boolean);set('summary-shifts',names.length===2?names.join(' and '):`${names.length} configured shifts`);};form.querySelectorAll('input,select').forEach(field=>field.addEventListener('input',update));types.addEventListener('change',()=>{if(!get('duration').dataset.changed)get('duration').value=types.value==='mid_sem'?'90':'180';update();});get('duration').addEventListener('input',()=>get('duration').dataset.changed='1');get('end-date').addEventListener('change',()=>get('end-date').setCustomValidity(get('start-date').value&&get('end-date').value<get('start-date').value?'End date must be after the start date.':''));form.querySelectorAll('input[type=time]').forEach(field=>field.addEventListener('change',()=>{const prefix=field.id.startsWith('shift1')?'shift1':'shift2',start=get(prefix+'-start'),end=get(prefix+'-end');end.setCustomValidity(start.value&&end.value<=start.value?'Shift end must be after its start time.':'');}));update();})();</script>

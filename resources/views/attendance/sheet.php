@@ -6,14 +6,16 @@
     <p><?= e(date('d F Y',strtotime($allocation['exam_date'])).' · '.$allocation['shift_name']) ?></p>
   </div>
   <div class="heading-actions">
-    <a class="primary-button" href="<?= e(url('attendance/'.$allocation['id'].'/export.xlsx')) ?>">Download shift Excel</a>
-    <a class="secondary-button" href="<?= e(url('attendance/cycles/'.$allocation['cycle_id'].'/export.xlsx')) ?>">Download exam cycle Excel</a>
+    <a class="primary-button" href="<?= e(url('attendance/'.$allocation['id'].'/export.xlsx')) ?>">Download session master Excel</a>
+    <a class="secondary-button" href="<?= e(url('attendance/cycles/'.$allocation['cycle_id'].'/export.xlsx')) ?>">Download exam-cycle master Excel</a>
     <button class="secondary-button" onclick="window.print()">Print</button>
   </div>
 </section>
 <?php if($success): ?><div class="alert success no-print" role="status"><?= e($success) ?></div><?php endif; ?>
 <?php if($error): ?><div class="alert error no-print" role="alert"><?= e($error) ?></div><?php endif; ?>
 <?php if(!$byRoom): ?><p>No attendance records are available for this shift.</p><?php endif; ?>
+
+<?php require __DIR__.'/live-rooms.php'; ?>
 
 <?php foreach($byRoom as $room=>$items):
     $roomId=(int)$items[0]['room_id'];
@@ -28,7 +30,7 @@
       <strong>Gautam Buddha University</strong>
       <h2>Attendance Sheet - Room <?= e($room) ?></h2>
       <p><?= e(date('d-m-Y',strtotime($allocation['exam_date'])).' | '.$allocation['shift_name'].' | '.substr($allocation['start_time'],0,5).'-'.substr($allocation['end_time'],0,5)) ?></p>
-      <p class="no-print"><?= $locked?'Submitted and locked. Use Faculty requests to approve a correction.':'Editable attendance' ?></p>
+      <p class="no-print"><?= $locked?(($roomState['lock_reason']??'manual')==='automatic'?'Automatically locked at the deadline. Approve a correction request to reopen.':'Locked by the teacher. Approve a correction request to reopen.'):'Teachers can mark and lock this room. It locks automatically at exam end.' ?></p>
     </header>
     <table>
       <thead><tr><th>S.No.</th><th>Seat</th><th>Roll Number</th><th>Student Name</th><th>Programme</th><th>Paper</th><th>Attendance</th><th>Signature</th></tr></thead>

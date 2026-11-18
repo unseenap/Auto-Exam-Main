@@ -47,7 +47,7 @@ final class XlsxExporter
             foreach($row as $i=>$value){
                 $ref=$this->column($i+1).$next;
                 if($value instanceof \DateTimeImmutable){
-                    $timestamp=$sheet['headers'][$i]==='Timestamp';
+                    $timestamp=in_array($sheet['headers'][$i],['Timestamp','Marked at','Last updated at','Locked at'],true);
                     $number=(int)$value->format('U')/86400+25569;
                     $cells.='<c r="'.$ref.'" s="'.($timestamp?12:11).'"><v>'.$number.'</v></c>';
                 }elseif(is_int($value)){

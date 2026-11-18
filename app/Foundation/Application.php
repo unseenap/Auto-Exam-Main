@@ -207,6 +207,9 @@ final class Application
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='GET')return Response::html(View::render('attendance/sheet',$this->attendanceSheetData((int)$matches[1])));
         if(preg_match('#^/attendance/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->saveAttendance($request,(int)$matches[1]);
         if(preg_match('#^/attendance/(\d+)/export\.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->attendanceXlsx((int)$matches[1],false);
+        if(preg_match('#^/attendance/(\d+)/rooms/(\d+)/export\.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->attendanceXlsx((int)$matches[1],false,(int)$matches[2]);
+        if($path==='/attendance/snapshot'&&$method==='GET')return $this->attendanceSnapshot();
+        if(preg_match('#^/attendance/(\d+)/snapshot$#',$path,$matches)===1&&$method==='GET')return $this->attendanceSnapshot((int)$matches[1]);
         if(preg_match('#^/attendance/cycles/(\d+)/export\.xlsx$#',$path,$matches)===1&&$method==='GET')return $this->attendanceXlsx((int)$matches[1],true);
         if(preg_match('#^/invigilation/allocate/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->allocateInvigilators($request,(int)$matches[1]);
         if($path==='/replacements'&&$method==='POST')return $this->requestReplacement($request);
@@ -226,6 +229,7 @@ final class Application
         if(preg_match('#^/masters/programmes/(\d+)/duration$#',$path,$matches)===1&&$method==='POST')return $this->saveProgrammeDuration($request,(int)$matches[1]);
         if($path==='/masters/batches'&&$method==='POST')return $this->saveBatch($request);
         if($path==='/faculty/availability'&&$method==='POST')return $this->saveFacultyAvailability($request);
+        if($path==='/users/faculty-import'||str_starts_with($path,'/users/faculty-import/'))return (new \App\Faculty\FacultyAccountController($this->database->connection()))->handle($request,$path);
         if($path==='/users'&&$method==='POST')return $this->saveUser($request);
         if(preg_match('#^/users/(\d+)$#',$path,$matches)===1&&$method==='POST')return $this->saveUser($request,(int)$matches[1]);
 
@@ -1098,24 +1102,35 @@ final class Application
 
     private function attendanceData(): array
     {
-        return ['allocations'=>$this->database->connection()->query("SELECT sa.id,sa.cycle_id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,
+        $pdo=$this->database->connection();$today=$pdo->quote(date('Y-m-d'));
+        \App\Faculty\FacultyPortalMigration::apply($pdo);
+        $roomSummaries=(new \App\Faculty\AttendanceOperations($pdo))->rooms();
+        return ['roomSummaries'=>$roomSummaries,'allocations'=>$this->database->connection()->query("SELECT sa.id,sa.cycle_id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,
             COUNT(a.id) AS student_count,SUM(a.status NOT IN ('absent','unmarked')) AS present_count,SUM(a.status='absent') AS absent_count,
             SUM(a.status='unmarked') AS unmarked_count,COUNT(DISTINCT a.room_id) AS room_count
             FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id LEFT JOIN attendance a ON a.allocation_id=sa.id
-            WHERE sa.status='published' GROUP BY sa.id ORDER BY sa.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success')];
+            WHERE sa.status='published' GROUP BY sa.id ORDER BY (sa.exam_date={$today}) DESC,sa.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success')];
     }
 
-    private function attendanceXlsx(int $id,bool $wholeCycle): Response
+    private function attendanceSnapshot(?int $allocationId=null): Response
+    {
+        $pdo=$this->database->connection();
+        \App\Faculty\FacultyPortalMigration::apply($pdo);
+        return Response::json(['rooms'=>(new \App\Faculty\AttendanceOperations($pdo))->rooms($allocationId),'refreshed_at'=>date('Y-m-d H:i:s')]);
+    }
+
+    private function attendanceXlsx(int $id,bool $wholeCycle,?int $roomId=null): Response
     {
         $pdo=$this->database->connection();
         $scope=$wholeCycle?'cycle_id':'id';
-        $query=$pdo->prepare("SELECT cycle_id FROM seating_allocations WHERE {$scope}=? AND status='published' LIMIT 1");
-        $query->execute([$id]);
+        $query=$pdo->prepare("SELECT cycle_id FROM seating_allocations WHERE {$scope}=? AND status='published'
+            AND (? IS NULL OR EXISTS(SELECT 1 FROM seating_assignments x WHERE x.allocation_id=seating_allocations.id AND x.room_id=?)) LIMIT 1");
+        $query->execute([$id,$roomId,$roomId]);
         $cycleId=$query->fetchColumn();
         if(!$cycleId)return Response::html(View::render('errors/404'),404);
         \App\Faculty\FacultyPortalMigration::apply($pdo);
-        $bytes=(new \App\Export\AttendanceWorkbook($pdo))->build((int)$cycleId,$wholeCycle?null:$id);
-        return Response::xlsx($bytes,'gbu-attendance-'.($wholeCycle?'cycle':'session').'-'.$id.'.xlsx');
+        $bytes=(new \App\Export\AttendanceWorkbook($pdo))->build((int)$cycleId,$wholeCycle?null:$id,$roomId);
+        return Response::xlsx($bytes,'gbu-attendance-'.($wholeCycle?'cycle':'session').'-'.$id.($roomId?'-room-'.$roomId:'').'.xlsx');
     }
 
     private function attendanceSheetData(int $allocationId): array
@@ -1131,7 +1146,8 @@ final class Application
             $records=$portal->records($allocationId,$roomId);
             if($records)$byRoom[$room['code']]=$records;
         }
-        return compact('allocation','byRoom','roomStates')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+        $roomSummaries=(new \App\Faculty\AttendanceOperations($pdo))->rooms($allocationId);
+        return compact('allocation','byRoom','roomStates','roomSummaries')+['success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function saveAttendance(Request $request,int $allocationId): Response
@@ -1146,7 +1162,8 @@ final class Application
     private function invigilationData(): array
     {
         $required=\App\Faculty\InvigilationService::INVIGILATORS_PER_ROOM;
-        $pdo=$this->database->connection();return ['sessions'=>$pdo->query("SELECT sa.id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,
+        \App\Faculty\FacultyPortalMigration::apply($this->database->connection());
+        $pdo=$this->database->connection();$today=$pdo->quote(date('Y-m-d'));return ['sessions'=>$pdo->query("SELECT sa.id,sa.exam_date,ec.name AS cycle_name,es.name AS shift_name,es.start_time,es.end_time,
             COUNT(DISTINCT ss.room_id) AS room_count,
             COUNT(DISTINCT CASE WHEN (
                 SELECT COUNT(DISTINCT ia.faculty_id) FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id
@@ -1155,8 +1172,8 @@ final class Application
                 AND ia.duty_role IN ('invigilator','senior_invigilator') AND f.status='active'
             ) >= {$required} THEN ss.room_id END) AS covered_rooms,
             (SELECT COUNT(*) FROM invigilation_allocations ia WHERE ia.cycle_id=sa.cycle_id AND ia.exam_date=sa.exam_date AND ia.shift_id=sa.shift_id AND ia.duty_status IN ('assigned','confirmed','completed')) AS duty_count
-            FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id JOIN seating_assignments ss ON ss.allocation_id=sa.id WHERE sa.status='published' GROUP BY sa.id ORDER BY sa.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),
-            'duties'=>$pdo->query("SELECT ia.*,f.name AS faculty_name,f.employee_id,r.code AS room_code,es.name AS shift_name,ec.name AS cycle_name FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id JOIN rooms r ON r.id=ia.room_id JOIN exam_shifts es ON es.id=ia.shift_id JOIN exam_cycles ec ON ec.id=ia.cycle_id WHERE ia.duty_status IN ('assigned','confirmed','completed') ORDER BY ia.exam_date DESC,es.sequence_no,r.code")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
+            FROM seating_allocations sa JOIN exam_cycles ec ON ec.id=sa.cycle_id JOIN exam_shifts es ON es.id=sa.shift_id JOIN seating_assignments ss ON ss.allocation_id=sa.id WHERE sa.status='published' GROUP BY sa.id ORDER BY (sa.exam_date={$today}) DESC,sa.exam_date DESC")->fetchAll(PDO::FETCH_ASSOC),
+            'duties'=>$pdo->query("SELECT ia.*,f.name AS faculty_name,f.employee_id,r.code AS room_code,es.name AS shift_name,es.start_time,es.end_time,ec.name AS cycle_name,u.username AS login_username FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id JOIN rooms r ON r.id=ia.room_id JOIN exam_shifts es ON es.id=ia.shift_id JOIN exam_cycles ec ON ec.id=ia.cycle_id LEFT JOIN faculty_user_links l ON l.faculty_id=f.id LEFT JOIN users u ON u.id=l.user_id WHERE ia.duty_status IN ('assigned','confirmed','completed') ORDER BY (ia.exam_date={$today}) DESC,ia.exam_date DESC,es.sequence_no,r.code")->fetchAll(PDO::FETCH_ASSOC),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
 
     private function allocateInvigilators(Request $request,int $allocationId): Response
@@ -1328,6 +1345,7 @@ final class Application
     private function userData():array
     {
         \App\Faculty\FacultyPortalMigration::apply($this->database->connection());
+        \App\Auth\EmailUsernameMigration::apply($this->database->connection());
         $pdo=$this->database->connection();$definitions=RolePolicy::definitions();$roles=$pdo->query('SELECT id,code,name FROM roles ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);foreach($roles as &$role){$role['description']=$definitions[$role['code']]['description']??'';$role['permissions']=RolePolicy::grants($role['code']);}unset($role);
         return ['users'=>$pdo->query('SELECT u.id,u.username,u.name,u.email,u.status,u.last_login_at,u.created_at,(SELECT fl.faculty_id FROM faculty_user_links fl WHERE fl.user_id=u.id) AS faculty_id,r.id AS role_id,r.code AS role_code,r.name AS role_name FROM users u JOIN roles r ON r.id=u.role_id ORDER BY u.name')->fetchAll(PDO::FETCH_ASSOC),'roles'=>$roles,'facultyOptions'=>$pdo->query('SELECT id,employee_id,name FROM faculty WHERE status=\'active\' ORDER BY name')->fetchAll(PDO::FETCH_ASSOC),'permissionLabels'=>RolePolicy::permissionLabels(),'success'=>$this->session->pullFlash('success'),'error'=>$this->session->pullFlash('error')];
     }
@@ -1335,9 +1353,10 @@ final class Application
     private function saveUser(Request $request,?int $id=null):Response
     {
         \App\Faculty\FacultyPortalMigration::apply($this->database->connection());
+        \App\Auth\EmailUsernameMigration::apply($this->database->connection());
         if(!$this->session->validCsrf((string)$request->input('_token')))return Response::redirect(url('users'));
         $pdo=$this->database->connection();$username=strtolower(trim((string)$request->input('username')));$name=trim((string)$request->input('name'));$email=trim((string)$request->input('email'))?:null;$roleId=(int)$request->input('role_id');$status=(string)$request->input('status','active');$password=(string)$request->input('password');
-        if(!preg_match('/^[a-z0-9._-]{3,80}$/',$username)||$name===''||!in_array($status,['active','inactive','locked'],true)){$this->session->flash('error','Enter a valid username, name, role, and account status.');return Response::redirect(url('users'));}
+        if(!\App\Auth\Username::valid($username)||$name===''||!in_array($status,['active','inactive','locked'],true)){$this->session->flash('error','Enter a valid username or email, name, role, and account status.');return Response::redirect(url('users'));}
         if($email!==null&&!filter_var($email,FILTER_VALIDATE_EMAIL)){$this->session->flash('error','Enter a valid university email address.');return Response::redirect(url('users'));}
         if(!$id&&strlen($password)<12){$this->session->flash('error','New accounts require a password of at least 12 characters.');return Response::redirect(url('users'));}
         $role=$pdo->prepare('SELECT code FROM roles WHERE id=:id');$role->execute(['id'=>$roleId]);$roleCode=(string)$role->fetchColumn();if($roleCode===''){$this->session->flash('error','Select a valid role.');return Response::redirect(url('users'));}

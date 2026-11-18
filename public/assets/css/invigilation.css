@@ -12,3 +12,4 @@
 .session-allocation .heading-actions form{grid-column:auto;margin:0}
 @media(max-width:1150px){.session-allocation>.heading-actions{grid-column:2/-1;grid-template-columns:repeat(2,minmax(0,1fr));align-items:center}}
 @media(max-width:560px){.session-allocation>.heading-actions{grid-column:1/-1}}
+.duty-login{overflow-wrap:anywhere}

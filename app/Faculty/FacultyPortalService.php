@@ -44,6 +44,7 @@ final class FacultyPortalService
     public function duties(int $user):array
     {
         $f=$this->faculty($user);
+        (new AttendanceOperations($this->pdo,$this->now()))->expire();
         return $this->rows("SELECT ia.*,ec.name AS cycle_name,es.name AS shift_name,es.start_time,es.end_time,r.code AS room_code,r.building,r.floor,ack.acknowledged_at,
             (SELECT COUNT(*) FROM seating_assignments x JOIN seating_allocations sa ON sa.id=x.allocation_id WHERE sa.cycle_id=ia.cycle_id AND sa.exam_date=ia.exam_date AND sa.shift_id=ia.shift_id AND sa.status='published' AND x.room_id=ia.room_id) AS students,
             (SELECT fs.status FROM faculty_room_sessions fs JOIN seating_allocations sa ON sa.id=fs.allocation_id WHERE sa.cycle_id=ia.cycle_id AND sa.exam_date=ia.exam_date AND sa.shift_id=ia.shift_id AND sa.status='published' AND fs.room_id=ia.room_id ORDER BY sa.version_no DESC LIMIT 1) AS attendance_status,
@@ -60,8 +61,12 @@ final class FacultyPortalService
     }
     public function session(int $allocation,int $room,bool $lock=false):array
     {
+        if(!$this->pdo->inTransaction())(new AttendanceOperations($this->pdo,$this->now()))->expire($allocation,$room);
         $this->exec('INSERT IGNORE INTO faculty_room_sessions(allocation_id,room_id) VALUES(?,?)',[$allocation,$room]);
-        return $this->row('SELECT fs.*,u.name AS editor_name,sub.name AS submitter_name,rep.name AS reporter_name FROM faculty_room_sessions fs LEFT JOIN users u ON u.id=fs.edited_by LEFT JOIN users sub ON sub.id=fs.submitted_by LEFT JOIN users rep ON rep.id=fs.report_by WHERE fs.allocation_id=? AND fs.room_id=?'.($lock?' FOR UPDATE':''),[$allocation,$room]);
+        return $this->row("SELECT fs.*,u.name AS editor_name,sub.name AS submitter_name,rep.name AS reporter_name,
+            CASE WHEN fs.status='submitted' AND fs.submitted_by IS NULL THEN 'automatic' ELSE 'manual' END AS lock_reason
+            FROM faculty_room_sessions fs LEFT JOIN users u ON u.id=fs.edited_by LEFT JOIN users sub ON sub.id=fs.submitted_by
+            LEFT JOIN users rep ON rep.id=fs.report_by WHERE fs.allocation_id=? AND fs.room_id=?".($lock?' FOR UPDATE':''),[$allocation,$room]);
     }
     private function allocation(array $d):array
     {
@@ -78,8 +83,11 @@ final class FacultyPortalService
     {
         $s=$this->settings();$zone=new DateTimeZone('Asia/Kolkata');
         $start=new DateTimeImmutable($d['exam_date'].' '.$d['start_time'],$zone);$end=new DateTimeImmutable($d['exam_date'].' '.$d['end_time'],$zone);if($end<$start)$end=$end->modify('+1 day');
-        $open=$start->modify('-'.$s['attendance_before_minutes'].' minutes');$close=$end->modify('+'.$s['attendance_after_minutes'].' minutes');
-        return ['open'=>$open->format('d M Y, H:i'),'close'=>$close->format('d M Y, H:i'),'allowed'=>$this->now()>=$open&&$this->now()<=$close,'reporting'=>$start->modify('-'.$s['reporting_minutes'].' minutes')->format('H:i')];
+        $open=$start;$close=$end;
+        return ['open'=>$open->format('d M Y, H:i'),'close'=>$close->format('d M Y, H:i'),
+            'allowed'=>$this->now()>=$open&&$this->now()<$close,
+            'remaining_seconds'=>max(0,$close->getTimestamp()-$this->now()->getTimestamp()),
+            'reporting'=>$start->modify('-'.$s['reporting_minutes'].' minutes')->format('H:i')];
     }
     public function room(int $user,int $duty):array
     {
@@ -88,7 +96,7 @@ final class FacultyPortalService
         $assigned=(int)$this->row('SELECT COUNT(*) AS n FROM seating_assignments WHERE allocation_id=? AND room_id=?',[$a['id'],$d['room_id']])['n'];
         if(count($records)!==$assigned)throw new PortalException('Room '.$d['room_code'].' has '.$assigned.' allocated students but '.count($records).' attendance entries. Ask the coordinator to repair the published attendance sheet.');
         $co=$this->rows("SELECT f.name,ia.duty_role FROM invigilation_allocations ia JOIN faculty f ON f.id=ia.faculty_id WHERE ia.cycle_id=? AND ia.exam_date=? AND ia.shift_id=? AND ia.room_id=? AND ia.id<>? AND ia.duty_status<>'cancelled'",[$d['cycle_id'],$d['exam_date'],$d['shift_id'],$d['room_id'],$duty]);
-        $window=$this->window($d);if($state['reopened_until']&&$state['reopened_until']>=$this->stamp()){$window['allowed']=true;$window['close']=$state['reopened_until'];$window['open']='Coordinator-approved correction window';}
+        $window=$this->window($d);if($state['reopened_until']&&$state['reopened_until']>$this->stamp()){$window['allowed']=true;$window['close']=$state['reopened_until'];$window['open']='Coordinator-approved correction window';$window['remaining_seconds']=(new DateTimeImmutable($state['reopened_until'],new DateTimeZone('Asia/Kolkata')))->getTimestamp()-$this->now()->getTimestamp();}
         return ['duty'=>$d,'allocation'=>$a,'state'=>$state,'records'=>$records,'window'=>$window,'seats'=>$this->rows('SELECT * FROM room_seats WHERE room_id=? ORDER BY sequence_no',[$d['room_id']]),'colleagues'=>$co,'corrections'=>$this->rows('SELECT * FROM faculty_correction_requests WHERE session_id=? ORDER BY id DESC',[$state['id']]),'replacements'=>$this->rows('SELECT * FROM replacement_requests WHERE duty_id=? ORDER BY id DESC',[$duty])];
     }
     private function editContext(int $user,int $duty,int $revision):array
@@ -96,11 +104,20 @@ final class FacultyPortalService
         $d=$this->duty($user,$duty,true);$a=$this->allocation($d);$s=$this->session((int)$a['id'],(int)$d['room_id'],true);
         if($s['status']==='submitted')throw new PortalException('Attendance for room '.$d['room_code'].' has been submitted and locked. Request a correction to reopen it.',409);
         if((int)$s['revision']!==$revision)throw new PortalException('Another invigilator updated room '.$d['room_code'].'. Reload the latest attendance before applying your change.',409);
-        $window=$this->window($d);if(!$window['allowed']&&(!$s['reopened_until']||$s['reopened_until']<$this->stamp()))throw new PortalException('Attendance for room '.$d['room_code'].' is editable from '.$window['open'].' to '.$window['close'].' (Asia/Kolkata).',403);
+        $window=$this->window($d);$allowed=$s['reopened_until']?$s['reopened_until']>$this->stamp():$window['allowed'];if(!$allowed)throw new PortalException(
+            'This duty is for '.$d['cycle_name'].' in room '.$d['room_code'].'. Attendance follows this exam’s saved time, from '.
+            $window['open'].' to '.$window['close'].' (Asia/Kolkata). Check the exam date and cycle in My duties.',403);
         return [$d,$a,$s];
+    }
+    private function expireDuty(int $user,int $duty):void
+    {
+        $d=$this->duty($user,$duty,true);
+        $a=$this->allocation($d);
+        (new AttendanceOperations($this->pdo,$this->now()))->expire((int)$a['id'],(int)$d['room_id']);
     }
     public function mark(int $user,int $duty,int $record,string $status,string $remarks,int $revision,array $serials=[]):array
     {
+        $this->expireDuty($user,$duty);
         return $this->transaction(function()use($user,$duty,$record,$status,$remarks,$revision,$serials){
             [$d,$a,$s]=$this->editContext($user,$duty,$revision);
             if(!in_array($status,['unmarked','present','absent','unfair_means','withheld','other'],true))throw new PortalException('Choose a valid attendance status.');
@@ -136,6 +153,7 @@ final class FacultyPortalService
     }
     public function submit(int $user,int $duty,int $revision):void
     {
+        $this->expireDuty($user,$duty);
         $this->transaction(function()use($user,$duty,$revision){
             [$d,$a,$s]=$this->editContext($user,$duty,$revision);$records=$this->records((int)$a['id'],(int)$d['room_id']);
             $missing=array_filter($records,static fn(array $r):bool=>$r['status']==='unmarked');
@@ -169,10 +187,12 @@ final class FacultyPortalService
     private function reason(string $reason):void{if(trim($reason)===''||strlen($reason)>1000)throw new PortalException('Enter a reason of 1–1000 characters.');}
     public function correction(int $user,int $duty,string $reason):void
     {
+        $this->expireDuty($user,$duty);
         $this->transaction(function()use($user,$duty,$reason){$d=$this->duty($user,$duty,true);$a=$this->allocation($d);$s=$this->session((int)$a['id'],(int)$d['room_id'],true);$this->reason($reason);if($s['status']!=='submitted')throw new PortalException('Attendance is already editable; no correction request is needed.');if($this->row("SELECT id FROM faculty_correction_requests WHERE session_id=? AND status='pending'",[$s['id']]))throw new PortalException('A correction request for this room is already pending.');$this->exec("INSERT INTO faculty_correction_requests(session_id,requested_by,reason,created_at) VALUES(?,?,?,?)",[$s['id'],$user,trim($reason),$this->stamp()]);$this->audit($user,'faculty.correction_requested','faculty_room_session',(int)$s['id'],['reason'=>$reason]);});
     }
     public function closeReport(int $user,int $duty,int $revision,array $books,bool $handed,string $remarks,string $incident):void
     {
+        $this->expireDuty($user,$duty);
         $this->transaction(function()use($user,$duty,$revision,$books,$handed,$remarks,$incident){
             $d=$this->duty($user,$duty,true);$a=$this->allocation($d);$s=$this->session((int)$a['id'],(int)$d['room_id'],true);
             if($s['status']!=='submitted')throw new PortalException('Submit attendance before completing the room-closing report.');
@@ -180,7 +200,7 @@ final class FacultyPortalService
             if((int)$s['revision']!==$revision)throw new PortalException('The room changed. Reload before submitting its closing report.',409);
             if(!$handed)throw new PortalException('Confirm that the answer books have been handed over.');
             if(strlen($remarks)>2000||strlen($incident)>4000)throw new PortalException('Keep remarks within 2000 characters and incidents within 4000 characters.');
-            $subjects=[];foreach($this->records((int)$a['id'],(int)$d['room_id']) as $r){$key=(int)$r['examination_id'];$subjects[$key]??=['code'=>$r['course_code'],'name'=>$r['course_name'],'expected'=>0];if(in_array($r['status'],['present','unfair_means','withheld','other'],true))$subjects[$key]['expected']++;}
+            $subjects=[];foreach($this->records((int)$a['id'],(int)$d['room_id']) as $r){if($r['status']==='unmarked')throw new PortalException('Attendance contains unmarked students. Request a correction before submitting the room-closing report.');$key=(int)$r['examination_id'];$subjects[$key]??=['code'=>$r['course_code'],'name'=>$r['course_name'],'expected'=>0];if(in_array($r['status'],['present','unfair_means','withheld','other'],true))$subjects[$key]['expected']++;}
             if(array_diff(array_map('intval',array_keys($books)),array_keys($subjects)))throw new PortalException('The report includes a subject outside your room.');
             foreach($subjects as $id=>&$subject){$value=(string)($books[$id]??'');if(!ctype_digit($value)||strlen($value)>6)throw new PortalException('Enter the answer-book count for '.$subject['code'].'.');$subject['collected']=(int)$value;if($subject['collected']!==$subject['expected']&&trim($remarks)==='')throw new PortalException($subject['code'].' expects '.$subject['expected'].' answer books from attendance; you entered '.$value.'. Explain the discrepancy in Remarks.');}unset($subject);
             $report=['subjects'=>$subjects,'handed_over'=>true,'remarks'=>trim($remarks),'incident'=>trim($incident)];
@@ -234,6 +254,8 @@ final class FacultyPortalService
     }
     public function saveSettings(int $user,array $values):void
     {
+        $values['attendance_before_minutes']='0';
+        $values['attendance_after_minutes']='0';
         $this->requireCoordinator($user);$fields=['reporting_minutes','attendance_before_minutes','attendance_after_minutes'];foreach($fields as $field){$v=(string)($values[$field]??'');if(!ctype_digit($v)||(int)$v>1440)throw new PortalException('Enter '.$field.' as minutes from 0 to 1440.');}
         $this->transaction(function()use($user,$values){$this->exec('UPDATE faculty_portal_settings SET reporting_minutes=?,attendance_before_minutes=?,attendance_after_minutes=? WHERE id=1',[$values['reporting_minutes'],$values['attendance_before_minutes'],$values['attendance_after_minutes']]);$this->audit($user,'faculty.settings_updated','faculty_portal_settings',1,$values);});
     }
@@ -242,8 +264,11 @@ final class FacultyPortalService
     public function coordinatorAttendance(int $user,int $allocation,array $statuses,array $revisions,array $remarks=[],array $serials=[]):void
     {
         $this->requireCoordinator($user);
+        (new AttendanceOperations($this->pdo,$this->now()))->expire($allocation);
         $this->transaction(function()use($user,$allocation,$statuses,$revisions,$remarks,$serials){
-            if(!$this->row("SELECT id FROM seating_allocations WHERE id=? AND status='published' FOR UPDATE",[$allocation]))throw new PortalException('Only published attendance sheets can be edited.');
+            $allocationRow=$this->row("SELECT sa.*,es.start_time,es.end_time FROM seating_allocations sa
+                JOIN exam_shifts es ON es.id=sa.shift_id WHERE sa.id=? AND sa.status='published' FOR UPDATE",[$allocation]);
+            if(!$allocationRow)throw new PortalException('Only published attendance sheets can be edited.');
             $changed=[];
             foreach($statuses as $id=>$status){
                 $r=$this->row('SELECT a.*,ufm.first_copy_serial,ufm.second_copy_serial FROM attendance a LEFT JOIN attendance_ufm ufm ON ufm.attendance_id=a.id WHERE a.id=? AND a.allocation_id=?',[(int)$id,$allocation]);if(!$r)throw new PortalException('Attendance entry #'.(int)$id.' does not belong to this allocation.');
@@ -252,7 +277,10 @@ final class FacultyPortalService
                 $books=$this->ufmSerials($status,(array)($serials[$id]??[]),$r);
                 if($status===$r['status']&&$note===trim((string)$r['remarks'])&&(!$books||$books===['first_copy_serial'=>$r['first_copy_serial']??'','second_copy_serial'=>$r['second_copy_serial']??'']))continue;
                 if(in_array($status,['unfair_means','withheld','other'],true)&&$note==='')throw new PortalException('Remarks are required for exceptional attendance entry #'.(int)$id.'.');
-                $room=(int)$r['room_id'];if(!isset($changed[$room])){$s=$this->session($allocation,$room,true);if($s['status']==='submitted')throw new PortalException('Room #'.$room.' attendance is submitted. Approve a correction request in Faculty requests before editing.',409);if((int)$s['revision']!==(int)($revisions[$room]??-1))throw new PortalException('Room #'.$room.' changed after this sheet was opened. Reload before saving.',409);$changed[$room]=$s['id'];}
+                $room=(int)$r['room_id'];if(!isset($changed[$room])){$s=$this->session($allocation,$room,true);if($s['status']==='submitted')throw new PortalException('Room #'.$room.' attendance is submitted. Approve a correction request in Faculty requests before editing.',409);
+                    $beforeDeadline=$s['reopened_until']?$s['reopened_until']>$this->stamp():$this->window($allocationRow)['remaining_seconds']>0;
+                    if(!$beforeDeadline)throw new PortalException('The attendance deadline has passed. Approve a correction request before editing.',409);
+                    if((int)$s['revision']!==(int)($revisions[$room]??-1))throw new PortalException('Room #'.$room.' changed after this sheet was opened. Reload before saving.',409);$changed[$room]=$s['id'];}
                 $this->exec('UPDATE attendance SET status=?,remarks=?,marked_by=?,marked_at=? WHERE id=?',[$status,$note?:null,$user,$this->stamp(),$id]);
                 $this->saveUfm((int)$id,$books);
                 $this->audit($user,'attendance.coordinator_saved','attendance',(int)$id,['before'=>$r['status'],'after'=>$status,'remarks'=>$note]+$books);

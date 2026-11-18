@@ -43,8 +43,8 @@
         <?php endif; ?>
         <form id="login-form" method="post" action="<?= e(url('login')) ?>" class="login-form">
           <?= csrf_field() ?>
-          <label for="username">Username</label>
-          <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter your username" value="<?= e($oldUsername) ?>" required autofocus>
+          <label for="username">Username or email</label>
+          <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter your username or email" value="<?= e($oldUsername) ?>" required autofocus>
           <div class="password-label"><label for="password">Password</label><button id="password-toggle" type="button" aria-controls="password" aria-pressed="false"><i class="ti ti-eye" aria-hidden="true"></i><span>Show password</span></button></div>
           <div class="password-control"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><span id="caps-warning" role="status" hidden>Caps Lock is on</span></div>
           <button class="login-submit" type="submit"><span><i class="ti ti-login-2" aria-hidden="true"></i> Sign in securely</span><i class="ti ti-arrow-right" aria-hidden="true"></i></button>

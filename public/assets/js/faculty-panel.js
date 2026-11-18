@@ -13,7 +13,16 @@
   const card=id=>document.getElementById('fp-student-'+id);
   const fieldKey=input=>input.dataset.ufmSerial||'remarks';
   const fields='[data-remarks], [data-ufm-serial]';
-  const clean=()=>!working&&!queue.length&&!failed.length&&[...root.querySelectorAll(fields)].every(n=>n.value===(records.get(n.closest('[data-record]').dataset.record)[fieldKey(n)]||''));
+  const clean=()=>{
+    const fieldsSaved=[...root.querySelectorAll(fields)].every(input=>
+      input.value===(records.get(input.closest('[data-record]').dataset.record)[fieldKey(input)]||''));
+    const statusesSaved=[...root.querySelectorAll('[data-record]')].every(node=>{
+      const status=records.get(node.dataset.record).status;
+      const expected=['unfair_means','withheld','other'].includes(status)?status:'unmarked';
+      return node.querySelector('[data-exception]').value===expected;
+    });
+    return !working&&!queue.length&&!failed.length&&fieldsSaved&&statusesSaved;
+  };
   const showUfmFields=node=>{node.querySelector('[data-ufm-fields]').hidden=node.querySelector('[data-exception]').value!=='unfair_means';};
   const syncFields=(node,r)=>{
     node.querySelectorAll(fields).forEach(input=>input.value=r[fieldKey(input)]||'');
@@ -48,6 +57,37 @@
     if(!review.children.length){const li=document.createElement('li');li.textContent='All allocated students are marked Present.';review.append(li);}
     applyFilters();controls();
   };
+  let deadlineTimer,countdownTimer;
+  const scheduleLock=seconds=>{
+    clearTimeout(deadlineTimer);
+    clearInterval(countdownTimer);
+    const countdown=document.getElementById('fp-lock-countdown');
+    if(!editable){
+      if(countdown)countdown.textContent='Attendance entry is closed';
+      return;
+    }
+    if(!Number.isFinite(Number(seconds)))return;
+    const deadline=performance.now()+Math.max(0,Number(seconds)*1000);
+    const updateCountdown=()=>{
+      if(!countdown)return;
+      const remaining=Math.max(0,Math.ceil((deadline-performance.now())/1000));
+      const hours=Math.floor(remaining/3600),minutes=Math.floor(remaining%3600/60),seconds=remaining%60;
+      countdown.textContent='Automatic lock in '+[hours,minutes,seconds].map(value=>String(value).padStart(2,'0')).join(':');
+    };
+    updateCountdown();
+    countdownTimer=setInterval(updateCountdown,1000);
+    deadlineTimer=setTimeout(()=>{
+      clearInterval(countdownTimer);
+      if(countdown)countdown.textContent='Attendance deadline reached';
+      editable=false;
+      document.getElementById('fp-submission-status').textContent='Time locked';
+      const correction=root.querySelector('[data-request-correction]');if(correction)correction.disabled=false;
+      document.getElementById('fp-window-note').textContent='The attendance deadline has passed. Saved attendance is locked. Request coordinator approval for corrections.';
+      controls();
+      if(!clean())showError('The deadline has passed. Unsaved changes need a coordinator-approved correction.');
+      else snapshot().catch(error=>showError(error.message,true));
+    },Math.min(2147483647,Math.max(0,Number(seconds)*1000)));
+  };
   const snapshot=async(discard=false)=>{
     if(!discard&&!clean())return;
     const response=await fetch(base+'/snapshot',{headers:{Accept:'application/json'},cache:'no-store'});
@@ -59,9 +99,12 @@
     setRevision(data.revision);
     for(const r of data.records){records.set(String(r.id),r);const node=card(r.id);if(node)syncFields(node,r);}
     editable=data.state.status!=='submitted'&&data.window.allowed&&root.dataset.dutyCompleted!=='1';
-    document.getElementById('fp-submission-status').textContent=data.state.status==='submitted'?'Submitted · locked':(data.revision?'In progress':'Not started');
+    document.getElementById('fp-submission-status').textContent=data.state.status==='submitted'?(data.state.lock_reason==='automatic'?'Automatically locked':'Teacher locked'):(data.revision?'In progress':'Not started');
     saveStatus.textContent=data.state.edited_at?'Last saved '+data.state.edited_at+' by '+data.state.editor_name:'No attendance changes yet';
-    if(data.state.status==='submitted')document.getElementById('fp-window-note').textContent='Attendance submitted by '+data.state.submitter_name+' at '+data.state.submitted_at+'. Reload the page to open its closing report.';
+    if(data.state.status==='submitted')document.getElementById('fp-window-note').textContent=
+      (data.state.lock_reason==='automatic'?'Attendance automatically locked at the deadline on ':'Attendance locked by '+data.state.submitter_name+' on ')+data.state.submitted_at+'. Request coordinator approval for corrections. Reload to review the closing report.';
+    const correction=root.querySelector('[data-request-correction]');if(correction)correction.disabled=data.state.status!=='submitted';
+    scheduleLock(data.window.remaining_seconds);
     render();
   };
   const process=async()=>{
@@ -94,7 +137,7 @@
   };
   root.querySelectorAll('[data-record]').forEach(node=>{
     const exception=node.querySelector('[data-exception]');
-    exception.addEventListener('change',()=>showUfmFields(node));
+    exception.addEventListener('change',()=>{showUfmFields(node);controls();});
     node.querySelectorAll(fields).forEach(input=>input.addEventListener('input',controls));
     node.querySelectorAll('[data-mark]').forEach(button=>button.addEventListener('click',()=>mark(node,button.dataset.mark,true)));
     node.querySelector('[data-save-exception]').addEventListener('click',()=>mark(node,exception.value));
@@ -125,4 +168,5 @@
   setInterval(()=>snapshot().catch(e=>{if(clean())saveStatus.textContent='Live refresh unavailable: '+e.message;}),15000);
   addEventListener('online',()=>{if(failed.length&&!conflict)saveStatus.textContent='Connection restored. Use Retry save to send pending changes.';});
   render();
+  if(root.hasAttribute('data-lock-seconds'))scheduleLock(root.dataset.lockSeconds);
 })();
